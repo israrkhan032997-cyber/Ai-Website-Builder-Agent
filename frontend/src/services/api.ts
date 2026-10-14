@@ -4,8 +4,24 @@ const API_BASE = '/api/v1';
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(errorData.detail || `Request failed with status ${res.status}`);
+    let errorMessage = `Request failed with status ${res.status}`;
+    try {
+      const errorData = await res.json();
+      if (typeof errorData.detail === 'string') {
+        errorMessage = errorData.detail;
+      } else if (Array.isArray(errorData.detail)) {
+        errorMessage = errorData.detail
+          .map((item: any) => item.msg || (item.loc ? `${item.loc.join('.')}: ${item.msg}` : JSON.stringify(item)))
+          .join(', ');
+      } else if (errorData.message && typeof errorData.message === 'string') {
+        errorMessage = errorData.message;
+      } else if (errorData.detail) {
+        errorMessage = typeof errorData.detail === 'object' ? JSON.stringify(errorData.detail) : String(errorData.detail);
+      }
+    } catch {
+      errorMessage = res.statusText || errorMessage;
+    }
+    throw new Error(errorMessage);
   }
   return res.json();
 }

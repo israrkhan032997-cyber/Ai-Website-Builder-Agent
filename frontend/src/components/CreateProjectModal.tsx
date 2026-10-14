@@ -67,7 +67,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       });
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to create project.');
+      const msg = typeof err?.message === 'string' && err.message !== '[object Object]'
+        ? err.message
+        : (typeof err === 'string' ? err : JSON.stringify(err));
+      setError(msg || 'Failed to create project.');
     } finally {
       setIsSubmitting(false);
     }

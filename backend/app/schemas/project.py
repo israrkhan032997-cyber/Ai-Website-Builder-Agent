@@ -9,9 +9,9 @@ class ProjectCreate(BaseModel):
     description: str = Field(..., min_length=10, description="Description of the business, services, and value proposition")
     target_audience: Optional[str] = Field(None, max_length=255, description="Target demographic or customer persona")
     style: Optional[str] = Field("Modern & Clean", max_length=100, description="Desired visual design style")
-    primary_color: Optional[str] = Field("#2563eb", pattern=r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
-    secondary_color: Optional[str] = Field("#0f172a", pattern=r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
-    accent_color: Optional[str] = Field("#38bdf8", pattern=r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
+    primary_color: Optional[str] = "#2563eb"
+    secondary_color: Optional[str] = "#0f172a"
+    accent_color: Optional[str] = "#38bdf8"
     logo_url: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
