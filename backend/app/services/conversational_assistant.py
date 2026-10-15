@@ -1,10 +1,20 @@
+import json
 import logging
 import re
 from typing import Dict, Any, List, Optional, Tuple
+from pydantic import BaseModel
 from backend.app.schemas.chat import ConversationalStepResponse, RequirementsReview
 from backend.app.services.ai_provider import ai_provider
 
 logger = logging.getLogger(__name__)
+
+class TurnGuidance(BaseModel):
+    inferred_business_name: Optional[str] = None
+    inferred_industry: Optional[str] = None
+    inferred_description: Optional[str] = None
+    inferred_target_audience: Optional[str] = None
+    assistant_message: str
+    suggested_options: List[str]
 
 class ConversationalAssistant:
     """
@@ -80,6 +90,36 @@ class ConversationalAssistant:
                 return pages
         return self.PAGE_RECOMMENDATIONS["default"]
 
+    async def _ask_ai_turn_guidance(
+        self,
+        current_step: str,
+        user_message: str,
+        collected_data: Dict[str, Any]
+    ) -> Optional[TurnGuidance]:
+        if not ai_provider.is_configured():
+            return None
+        try:
+            prompt = f"""
+You are an intelligent, friendly AI Website Builder Consultant guiding a client through creating a professional business website.
+Current Step: {current_step}
+User's latest message: "{user_message}"
+Collected data so far: {json.dumps(collected_data)}
+
+Instructions:
+1. Extract any newly stated business attributes (business name, industry, services/description, target audience).
+2. Formulate a warm, personalized conversational assistant message that addresses the user's business directly and prompts for the next missing piece of information.
+3. Provide 3-4 realistic, highly relevant clickable suggestion chips specifically tailored to THIS business (e.g. for a soda company, options about flavors and retail; for a law firm, options about corporate litigation and personal injury).
+"""
+            guidance, _ = await ai_provider.generate_structured(
+                prompt=prompt,
+                schema_class=TurnGuidance,
+                system_instruction="You are an expert full-stack web consultant. Return valid JSON matching TurnGuidance. Never give generic boilerplate options."
+            )
+            return guidance
+        except Exception as e:
+            logger.warning(f"AI conversational guidance error: {e}")
+            return None
+
     async def process_chat_turn(
         self,
         user_message: str,
@@ -95,24 +135,42 @@ class ConversationalAssistant:
 
         # Step 1: Business Name or Initial Idea
         if current_step == "business_name":
-            # Extract business name or infer context
             data["raw_idea"] = msg
-            
-            # Check if user gave an idea like "Pepsi" or "Pepsi, an international soda brand"
             if "," in msg or " - " in msg or " for " in msg or len(msg.split()) > 4:
-                # Compound idea provided
                 parts = re.split(r"[,–—\-]| for ", msg, maxsplit=1)
                 data["business_name"] = parts[0].strip()
                 data["description"] = parts[1].strip() if len(parts) > 1 else msg
             else:
                 data["business_name"] = msg
 
-            # Attempt industry inference
+            ai_res = await self._ask_ai_turn_guidance(current_step, msg, data)
+            if ai_res:
+                if ai_res.inferred_business_name and not data.get("business_name"):
+                    data["business_name"] = ai_res.inferred_business_name
+                if ai_res.inferred_industry:
+                    data["industry"] = ai_res.inferred_industry
+                if ai_res.inferred_description and not data.get("description"):
+                    data["description"] = ai_res.inferred_description
+
+                if not data.get("industry"):
+                    next_s = "industry"
+                elif not data.get("description"):
+                    next_s = "description"
+                else:
+                    next_s = "target_audience"
+
+                return ConversationalStepResponse(
+                    assistant_message=ai_res.assistant_message,
+                    next_step=next_s,
+                    suggested_options=ai_res.suggested_options or self.INDUSTRY_OPTIONS,
+                    updated_data=data
+                )
+
+            # Fallback deterministic
             inferred_ind = self._infer_industry(msg)
             if inferred_ind:
                 data["industry"] = inferred_ind
 
-            # Decide next question
             if not data.get("industry"):
                 return ConversationalStepResponse(
                     assistant_message=f"Excellent! '{data['business_name']}' is a great name. What industry does your business belong to?",
@@ -138,6 +196,18 @@ class ConversationalAssistant:
         # Step 2: Industry Sector
         elif current_step == "industry":
             data["industry"] = msg
+            ai_res = await self._ask_ai_turn_guidance(current_step, msg, data)
+            if ai_res:
+                if ai_res.inferred_description and not data.get("description"):
+                    data["description"] = ai_res.inferred_description
+                next_s = "description" if not data.get("description") else "target_audience"
+                return ConversationalStepResponse(
+                    assistant_message=ai_res.assistant_message,
+                    next_step=next_s,
+                    suggested_options=ai_res.suggested_options,
+                    updated_data=data
+                )
+
             if not data.get("description"):
                 return ConversationalStepResponse(
                     assistant_message=f"Perfect. Tell me about '{data.get('business_name', 'your business')}', what services or products you provide, and your key strengths.",
@@ -156,6 +226,18 @@ class ConversationalAssistant:
         # Step 3: Business Description
         elif current_step == "description":
             data["description"] = msg
+            ai_res = await self._ask_ai_turn_guidance(current_step, msg, data)
+            if ai_res:
+                if ai_res.inferred_target_audience and not data.get("target_audience"):
+                    data["target_audience"] = ai_res.inferred_target_audience
+                next_s = "target_audience" if not data.get("target_audience") else "website_type"
+                return ConversationalStepResponse(
+                    assistant_message=ai_res.assistant_message,
+                    next_step=next_s,
+                    suggested_options=ai_res.suggested_options,
+                    updated_data=data
+                )
+
             if not data.get("target_audience"):
                 return ConversationalStepResponse(
                     assistant_message="Wonderful description! Who are your ideal customers or target audience?",
@@ -174,6 +256,14 @@ class ConversationalAssistant:
         # Step 4: Target Audience
         elif current_step == "target_audience":
             data["target_audience"] = msg
+            ai_res = await self._ask_ai_turn_guidance(current_step, msg, data)
+            if ai_res and ai_res.assistant_message:
+                return ConversationalStepResponse(
+                    assistant_message=ai_res.assistant_message,
+                    next_step="website_type",
+                    suggested_options=ai_res.suggested_options if len(ai_res.suggested_options) >= 2 else ["Single-page website (Smooth scrolling landing page)", "Multi-page website (Dedicated pages & navigation)"],
+                    updated_data=data
+                )
             return ConversationalStepResponse(
                 assistant_message="Would you prefer a single-page website or a multi-page website for your business?",
                 next_step="website_type",

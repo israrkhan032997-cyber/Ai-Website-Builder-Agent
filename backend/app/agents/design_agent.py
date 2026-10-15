@@ -1,7 +1,7 @@
 import logging
 import re
 from typing import Dict, List, Optional
-from backend.app.schemas.agent import WebsitePlan, AssetManifest, CodeFile
+from backend.app.schemas.agent import WebsitePlan, AssetManifest, CodeFile, SectionItem, SectionSpec
 from backend.app.services.ai_provider import ai_provider
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,136 @@ class DesignAgent:
                     active_style = f"border-color: {primary_color};" if is_active else ""
                     links_html += f'<a href="{file_name}" class="text-sm px-1 py-1 transition-colors {active_cls}" style="{active_style}">{p}</a>\n'
         return links_html
+
+    def _safe_lucide_icon(self, icon_name: Optional[str]) -> str:
+        if not icon_name:
+            return "Sparkles"
+        name = icon_name.strip()
+        clean = re.sub(r"[^a-zA-Z0-9]", "", name)
+        return clean if clean else "Sparkles"
+
+    def _render_dynamic_features_cards(self, plan: WebsitePlan, p_col: str, link_target: str = "services.html") -> str:
+        sec = next((s for s in plan.sections if s.type in ["features", "services"] or s.id in ["features", "services"]), None)
+        items = sec.items if sec and sec.items else []
+        if not items:
+            items = [
+                SectionItem(title=f"Signature {plan.industry} Solutions", description=f"Engineered specifically for {plan.business_name} clients to drive superior outcomes.", icon="Sparkles"),
+                SectionItem(title="Rapid Execution & Precision", description="Accelerating timelines through disciplined processes and modern methodologies.", icon="Zap"),
+                SectionItem(title="Dedicated Advisory & Support", description="Continuous consultation and dedicated specialist oversight at every milestone.", icon="ShieldCheck")
+            ]
+
+        cards_html = ""
+        for item in items[:6]:
+            icon = self._safe_lucide_icon(item.icon)
+            cards_html += f"""
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="{icon}" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">{item.title}</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed mb-4">{item.description}</p>
+                        <a href="{link_target}" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
+                    </div>"""
+        return cards_html
+
+    def _render_dynamic_services_page_cards(self, plan: WebsitePlan, p_col: str) -> str:
+        sec = next((s for s in plan.sections if s.type in ["features", "services"] or s.id in ["features", "services"]), None)
+        items = sec.items if sec and sec.items else []
+        if not items:
+            items = [
+                SectionItem(title=f"Full-Lifecycle {plan.industry} Services", description=f"Bespoke consulting, strategic deployment, and turnkey outcomes for {plan.business_name}.", icon="Layers"),
+                SectionItem(title="Scalability & Performance", description="Modernizing operations and scaling infrastructure to exceed benchmark standards.", icon="TrendingUp"),
+                SectionItem(title="Compliance, Quality & Security", description="Uncompromising adherence to industry protocols and data safeguards.", icon="ShieldCheck")
+            ]
+
+        cards_html = ""
+        for item in items:
+            icon = self._safe_lucide_icon(item.icon)
+            badge_text = item.badge or "Turnkey"
+            cards_html += f"""
+                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
+                                <i data-lucide="{icon}" class="w-6 h-6"></i>
+                            </div>
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">{badge_text}</span>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900">{item.title}</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">{item.description}</p>
+                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Tailored for {plan.business_name} clients</li>
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Full quality assurance & support</li>
+                        </ul>
+                    </div>"""
+        return cards_html
+
+    def _render_dynamic_testimonials(self, plan: WebsitePlan, p_col: str) -> str:
+        sec = next((s for s in plan.sections if s.type == "testimonials" or s.id == "testimonials"), None)
+        items = sec.items if sec and sec.items else []
+        if not items:
+            items = [
+                SectionItem(title="Enterprise Client", description=f"Partnering with {plan.business_name} elevated our operations in {plan.industry}. Their attention to detail and delivery speed are unmatched.", badge="Managing Director"),
+                SectionItem(title="Commercial Partner", description=f"Exceptional responsiveness, world-class execution, and measurable outcomes. Highly recommend {plan.business_name}.", badge="Head of Operations")
+            ]
+
+        cards_html = ""
+        for item in items[:3]:
+            cards_html += f"""
+                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                        <div class="flex text-amber-400 space-x-1">
+                            <i data-lucide="Star" class="w-4 h-4 fill-amber-400"></i>
+                            <i data-lucide="Star" class="w-4 h-4 fill-amber-400"></i>
+                            <i data-lucide="Star" class="w-4 h-4 fill-amber-400"></i>
+                            <i data-lucide="Star" class="w-4 h-4 fill-amber-400"></i>
+                            <i data-lucide="Star" class="w-4 h-4 fill-amber-400"></i>
+                        </div>
+                        <p class="text-slate-600 text-sm italic leading-relaxed">"{item.description}"</p>
+                        <div class="pt-3 border-t border-slate-100">
+                            <h4 class="font-bold text-slate-900 text-sm">{item.title}</h4>
+                            <p class="text-xs text-slate-400">{item.badge or "Verified Client"}</p>
+                        </div>
+                    </div>"""
+
+        return f"""
+        <!-- Testimonials Section -->
+        <section class="py-20 bg-slate-50 border-t border-slate-100">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Client Feedback</span>
+                    <h2 class="text-3xl font-extrabold text-slate-900 mt-1">Trusted by Industry Leaders</h2>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-{min(len(items), 3)} gap-8">
+                    {cards_html}
+                </div>
+            </div>
+        </section>"""
+
+    def _render_dynamic_portfolio_cards(self, plan: WebsitePlan, hero_img: str, features_img: str, about_img: str) -> str:
+        sec = next((s for s in plan.sections if s.type in ["portfolio", "projects", "gallery"] or s.id in ["portfolio", "projects"]), None)
+        items = sec.items if sec and sec.items else []
+        img_pool = [hero_img, features_img, about_img]
+
+        if not items:
+            items = [
+                SectionItem(title=f"Flagship {plan.industry} Deployment", description=f"Turnkey execution delivering benchmark performance for high-profile clients of {plan.business_name}.", badge="Flagship"),
+                SectionItem(title="Enterprise Transformation", description="Scalable modern implementation deployed seamlessly with zero operational downtime.", badge="Enterprise"),
+                SectionItem(title="Bespoke Client Initiative", description="Handcrafted solutions aligned to distinct aesthetic and functional requirements.", badge="Custom")
+            ]
+
+        cards_html = ""
+        for i, item in enumerate(items[:6]):
+            card_img = img_pool[i % len(img_pool)]
+            badge_text = item.badge or "Case Study"
+            cards_html += f"""
+                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
+                        <img src="{card_img}" alt="{item.title}" class="w-full h-56 object-cover">
+                        <div class="p-6 space-y-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-700">{badge_text}</span>
+                            <h3 class="text-lg font-bold text-slate-900">{item.title}</h3>
+                            <p class="text-xs text-slate-500 leading-relaxed">{item.description}</p>
+                        </div>
+                    </div>"""
+        return cards_html
 
     def _render_header(self, plan: WebsitePlan, assets: AssetManifest, current_page: str, pages: List[str]) -> str:
         p_col = plan.color_scheme.primary
@@ -222,30 +352,7 @@ class DesignAgent:
                     </a>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Quality & Reliability</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Engineered with uncompromising precision ensuring long-term value and operational excellence.</p>
-                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
-                    </div>
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="Zap" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Fast Execution</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Accelerate project delivery through streamlined modern methodologies and seasoned specialists.</p>
-                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
-                    </div>
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="Headphones" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Dedicated Advisory</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Direct access to dedicated experts committed to your continuous satisfaction and milestones.</p>
-                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
-                    </div>
+{self._render_dynamic_features_cards(plan, p_col, "services.html")}
                 </div>
             </div>
         </section>
@@ -270,6 +377,8 @@ class DesignAgent:
                 </div>
             </div>
         </section>
+
+{self._render_dynamic_testimonials(plan, p_col)}
 """
 
         elif "about" in p_lower:
@@ -349,41 +458,7 @@ class DesignAgent:
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
-                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="Layers" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900">Custom Engineering</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Tailor-made solutions designed from the ground up to match your distinct functional requirements.</p>
-                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Full-lifecycle consultation</li>
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Iterative design reviews</li>
-                        </ul>
-                    </div>
-
-                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="TrendingUp" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900">Optimization & Scale</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Modernize workflows and enhance operational efficiency with scalable modern architectures.</p>
-                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Performance benchmarking</li>
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Continuous optimization</li>
-                        </ul>
-                    </div>
-
-                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900">Compliance & Security</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Rigorous security audits and industry compliance built directly into every operational layer.</p>
-                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Secure API handlers</li>
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Data encryption standards</li>
-                        </ul>
-                    </div>
+{self._render_dynamic_services_page_cards(plan, p_col)}
                 </div>
 
                 <!-- Call to action card -->
@@ -414,32 +489,7 @@ class DesignAgent:
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
-                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
-                        <img src="{hero_img}" alt="Project 1" class="w-full h-56 object-cover">
-                        <div class="p-6 space-y-2">
-                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-700">Flagship Execution</span>
-                            <h3 class="text-lg font-bold text-slate-900">Metropolitan Development</h3>
-                            <p class="text-xs text-slate-500 leading-relaxed">Comprehensive turnkey delivery completed on time and exceeding benchmark performance.</p>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
-                        <img src="{features_img}" alt="Project 2" class="w-full h-56 object-cover">
-                        <div class="p-6 space-y-2">
-                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">Enterprise Scale</span>
-                            <h3 class="text-lg font-bold text-slate-900">Modern Infrastructure</h3>
-                            <p class="text-xs text-slate-500 leading-relaxed">State-of-the-art implementation engineered for multi-tenant scalability.</p>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
-                        <img src="{about_img}" alt="Project 3" class="w-full h-56 object-cover">
-                        <div class="p-6 space-y-2">
-                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-50 text-purple-700">Custom Bespoke</span>
-                            <h3 class="text-lg font-bold text-slate-900">Bespoke Client Initiative</h3>
-                            <p class="text-xs text-slate-500 leading-relaxed">Unique handcrafted craftsmanship aligned to the highest tier of aesthetic elegance.</p>
-                        </div>
-                    </div>
+{self._render_dynamic_portfolio_cards(plan, hero_img, features_img, about_img)}
                 </div>
             </div>
         </section>
@@ -677,27 +727,7 @@ class DesignAgent:
                     <h2 class="text-3xl font-extrabold text-slate-900 mt-1">Engineered for Excellence</h2>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Enterprise Reliability</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Built with rigorous standards ensuring 99.9% uptime and stability.</p>
-                    </div>
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="Zap" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Rapid Delivery</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Accelerate results with modern streamlined methodologies.</p>
-                    </div>
-                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
-                            <i data-lucide="Headphones" class="w-6 h-6"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Dedicated Support</h3>
-                        <p class="text-slate-600 text-sm leading-relaxed">Direct access to specialists around the clock for your success.</p>
-                    </div>
+{self._render_dynamic_features_cards(plan, p_col, "#contact")}
                 </div>
             </div>
         </section>
@@ -717,6 +747,8 @@ class DesignAgent:
                 </div>
             </div>
         </section>
+
+{self._render_dynamic_testimonials(plan, p_col)}
 
         <!-- Contact Section -->
         <section id="contact" class="py-20 bg-white border-t border-slate-100">

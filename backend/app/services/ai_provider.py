@@ -101,32 +101,77 @@ class AIProviderService:
         if not client:
             return None, "No active Gemini API key configured."
 
-        chosen_model = model_name or settings.GEMINI_MODEL or "gemini-2.5-flash"
-        sys_prompt = system_instruction or "You are an expert AI software architect and UI designer. You always return valid, complete JSON matching the requested schema."
+        candidate_models = [model_name] if model_name else [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+        # Filter unique and non-empty
+        models_to_try = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
 
+        sys_prompt = system_instruction or "You are an expert AI software architect and UI designer. You always return valid, complete JSON matching the requested schema."
         full_prompt = f"{prompt}\n\nStrict requirement: Output only valid JSON matching this schema: {schema_class.model_json_schema()}"
 
-        try:
-            config = types.GenerateContentConfig(
-                system_instruction=sys_prompt,
-                response_mime_type="application/json",
-                temperature=0.3
-            )
-            response = client.models.generate_content(
-                model=chosen_model,
-                contents=full_prompt,
-                config=config
-            )
+        last_err = ""
+        for model in models_to_try:
+            try:
+                config = types.GenerateContentConfig(
+                    system_instruction=sys_prompt,
+                    response_mime_type="application/json",
+                    temperature=0.3
+                )
+                response = client.models.generate_content(
+                    model=model,
+                    contents=full_prompt,
+                    config=config
+                )
 
-            if not response or not response.text:
-                return None, "Empty response received from Gemini."
+                if not response or not response.text:
+                    continue
 
-            data = self._extract_json(response.text)
-            instance = schema_class.model_validate(data)
-            return instance, f"Successfully generated via {chosen_model}."
+                data = self._extract_json(response.text)
+                instance = schema_class.model_validate(data)
+                return instance, f"Successfully generated via {model}."
+            except Exception as e:
+                last_err = str(e)
+                logger.warning(f"Structured generation with model {model} failed: {e}")
+                continue
 
-        except Exception as e:
-            logger.warning(f"Structured generation with Gemini encountered error: {e}")
-            return None, f"Gemini generation error: {str(e)}"
+        return None, f"Gemini generation error across models: {last_err}"
+
+    async def generate_text(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Generates freeform text using Gemini with resilient model fallback.
+        """
+        client = self.get_client(api_key)
+        if not client:
+            return None
+
+        candidate_models = [model_name] if model_name else [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
+        models_to_try = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
+
+        sys_prompt = system_instruction or "You are a professional, helpful conversational AI assistant."
+
+        for model in models_to_try:
+            try:
+                config = types.GenerateContentConfig(
+                    system_instruction=sys_prompt,
+                    temperature=0.7
+                )
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=config
+                )
+                if response and response.text:
+                    return response.text.strip()
+            except Exception as e:
+                logger.warning(f"Text generation with model {model} failed: {e}")
+                continue
+
+        return None
 
 ai_provider = AIProviderService()
+
