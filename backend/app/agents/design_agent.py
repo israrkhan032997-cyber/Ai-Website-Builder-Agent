@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, List, Optional
 from backend.app.schemas.agent import WebsitePlan, AssetManifest, CodeFile
 from backend.app.services.ai_provider import ai_provider
@@ -8,10 +9,10 @@ logger = logging.getLogger(__name__)
 class DesignAgent:
     """
     Design Agent:
-    - Generates clean, responsive, production-ready frontend code (HTML, CSS, JS).
-    - Implements modern design patterns tailored to the business brand.
-    - Assembles complete component sections (Navbar, Hero, Features, About, Testimonials, Pricing, Contact, Footer).
-    - Applies natural language design modifications accurately.
+    - Generates clean, responsive, production-ready frontend code (HTML5, modern Tailwind CSS, JS).
+    - Supports both Single-page landing pages and Multi-page corporate websites (Home, About, Services, Portfolio, Contact).
+    - Implements reusable component structures, responsive viewports, and accessible forms.
+    - Applies targeted natural language modifications (colors, headlines, sections).
     """
 
     AGENT_NAME = "Design Agent"
@@ -20,297 +21,491 @@ class DesignAgent:
         self,
         project_id: str,
         plan: WebsitePlan,
-        assets: AssetManifest
+        assets: AssetManifest,
+        website_type: str = "single-page",
+        selected_pages: Optional[List[str]] = None
     ) -> List[CodeFile]:
         """
-        Produces a complete, responsive frontend bundle:
-        - index.html (semantic, accessible, Tailwind CSS styled, Lucide icons)
-        - styles.css (design tokens, subtle animations, typography)
-        - main.js (mobile navigation, interactions, client form submission)
+        Produces a complete frontend bundle:
+        - If multi-page: index.html, about.html, services.html, portfolio.html, contact.html
+        - If single-page: index.html with smooth anchor scrolling
+        - styles.css
+        - main.js (mobile navigation drawer, active link highlighting, contact form submission)
         """
-        html_content = self._render_html(project_id, plan, assets)
-        css_content = self._render_css(plan)
-        js_content = self._render_js(project_id)
+        is_multi = website_type == "multi-page" or (selected_pages and len(selected_pages) > 1)
+        pages_to_build = selected_pages or (["Home", "About Us", "Services", "Portfolio", "Contact Us"] if is_multi else ["Home"])
 
-        return [
-            CodeFile(path="index.html", content=html_content, description="Main website entrypoint"),
-            CodeFile(path="styles.css", content=css_content, description="Custom styling and design tokens"),
-            CodeFile(path="main.js", content=js_content, description="Interactive client behaviors and form handling")
-        ]
+        files: List[CodeFile] = []
 
-    def _render_html(self, project_id: str, plan: WebsitePlan, assets: AssetManifest) -> str:
-        """Renders comprehensive, modern HTML5 document."""
-        p_col = plan.color_scheme.primary
-        s_col = plan.color_scheme.secondary
-        a_col = plan.color_scheme.accent
+        if is_multi:
+            # Multi-page architecture
+            # Normalize pages list
+            norm_pages = [p.strip().title() for p in pages_to_build if p.strip()]
+            if "Home" not in norm_pages:
+                norm_pages.insert(0, "Home")
 
-        # Find section images
-        hero_img = next((img.url for img in assets.images if img.type == "hero_image"), "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1600&q=80")
-        about_img = next((img.url for img in assets.images if img.type == "about_image"), "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80")
+            # Generate individual pages
+            for page_name in norm_pages:
+                file_slug = "index" if page_name.lower() in ["home", "index"] else self._slugify(page_name)
+                html = self._render_multipage_html(project_id, plan, assets, page_name, norm_pages)
+                files.append(CodeFile(
+                    path=f"{file_slug}.html",
+                    content=html,
+                    description=f"{page_name} page for {plan.business_name}"
+                ))
+        else:
+            # Single-page architecture
+            html = self._render_singlepage_html(project_id, plan, assets)
+            files.append(CodeFile(
+                path="index.html",
+                content=html,
+                description=f"Single-page landing page for {plan.business_name}"
+            ))
 
-        # Build Navigation links
-        nav_desktop = ""
-        nav_mobile = ""
-        for item in plan.navigation:
-            if item.is_cta:
-                nav_desktop += f'<a href="{item.href}" class="inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold text-white rounded-lg shadow-sm hover:opacity-95 transition-all" style="background-color: {p_col}">{item.label}</a>'
-                nav_mobile += f'<a href="{item.href}" class="block px-4 py-2 text-base font-semibold text-white rounded-lg text-center" style="background-color: {p_col}">{item.label}</a>'
+        # CSS and JS
+        files.append(CodeFile(path="styles.css", content=self._render_css(plan), description="Theme tokens and micro-interactions"))
+        files.append(CodeFile(path="main.js", content=self._render_js(project_id), description="Client scripts and form submission handler"))
+
+        return files
+
+    def _slugify(self, text: str) -> str:
+        s = text.lower().strip()
+        s = re.sub(r"[^a-z0-9]+", "-", s)
+        return s.strip("-")
+
+    def _render_nav_links(self, current_page: str, pages: List[str], primary_color: str, is_mobile: bool = False) -> str:
+        links_html = ""
+        for p in pages:
+            is_active = p.lower() == current_page.lower()
+            file_name = "index.html" if p.lower() == "home" else f"{self._slugify(p)}.html"
+            is_contact = p.lower() in ["contact", "contact us"]
+
+            if is_mobile:
+                if is_contact:
+                    links_html += f'<a href="{file_name}" class="block px-4 py-2.5 text-base font-bold text-white rounded-xl text-center shadow-sm" style="background-color: {primary_color}">{p}</a>\n'
+                else:
+                    active_cls = f"bg-blue-50 text-blue-700 font-bold" if is_active else "text-slate-700 hover:bg-slate-50 font-medium"
+                    links_html += f'<a href="{file_name}" class="block px-3 py-2 rounded-lg text-base {active_cls}">{p}</a>\n'
             else:
-                nav_desktop += f'<a href="{item.href}" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">{item.label}</a>'
-                nav_mobile += f'<a href="{item.href}" class="block px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50">{item.label}</a>'
+                if is_contact:
+                    links_html += f'<a href="{file_name}" class="inline-flex items-center px-5 py-2 text-sm font-bold text-white rounded-xl shadow-sm hover:opacity-95 transition-all" style="background-color: {primary_color}">{p}</a>\n'
+                else:
+                    active_cls = f"text-blue-600 font-bold border-b-2" if is_active else "text-slate-600 hover:text-slate-900 font-medium"
+                    active_style = f"border-color: {primary_color};" if is_active else ""
+                    links_html += f'<a href="{file_name}" class="text-sm px-1 py-1 transition-colors {active_cls}" style="{active_style}">{p}</a>\n'
+        return links_html
 
-        # Build Features Section Items
-        features_spec = next((s for s in plan.sections if s.type == "features"), None)
-        features_html = ""
-        if features_spec and features_spec.items:
-            for item in features_spec.items:
-                badge_html = f'<span class="inline-block px-2.5 py-0.5 mb-3 text-xs font-semibold rounded-full bg-blue-50 text-blue-700">{item.badge}</span>' if item.badge else ''
-                features_html += f"""
-                <div class="relative p-8 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
-                    <div class="w-12 h-12 flex items-center justify-center rounded-xl mb-5" style="background-color: {p_col}15; color: {p_col};">
-                        <i data-lucide="{item.icon or 'Sparkles'}" class="w-6 h-6"></i>
-                    </div>
-                    {badge_html}
-                    <h3 class="text-xl font-bold text-slate-900 mb-2">{item.title}</h3>
-                    <p class="text-slate-600 leading-relaxed text-sm">{item.description}</p>
-                </div>"""
+    def _render_header(self, plan: WebsitePlan, assets: AssetManifest, current_page: str, pages: List[str]) -> str:
+        p_col = plan.color_scheme.primary
+        nav_desktop = self._render_nav_links(current_page, pages, p_col, is_mobile=False)
+        nav_mobile = self._render_nav_links(current_page, pages, p_col, is_mobile=True)
 
-        # Build Testimonials Section Items
-        test_spec = next((s for s in plan.sections if s.type == "testimonials"), None)
-        testimonials_html = ""
-        if test_spec and test_spec.items:
-            for item in test_spec.items:
-                testimonials_html += f"""
-                <div class="p-8 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center space-x-1 text-amber-400 mb-4">
-                            <i data-lucide="Star" class="w-4 h-4 fill-current"></i>
-                            <i data-lucide="Star" class="w-4 h-4 fill-current"></i>
-                            <i data-lucide="Star" class="w-4 h-4 fill-current"></i>
-                            <i data-lucide="Star" class="w-4 h-4 fill-current"></i>
-                            <i data-lucide="Star" class="w-4 h-4 fill-current"></i>
-                        </div>
-                        <p class="text-slate-700 italic text-sm mb-6 leading-relaxed">"{item.description}"</p>
-                    </div>
-                    <div class="border-t border-slate-200/60 pt-4">
-                        <p class="font-bold text-slate-900 text-sm">{item.title}</p>
-                        <p class="text-xs text-slate-500">{item.badge or 'Verified Client'}</p>
-                    </div>
-                </div>"""
-
-        # Build Pricing Section Items
-        pricing_spec = next((s for s in plan.sections if s.type == "pricing"), None)
-        pricing_html = ""
-        if pricing_spec and pricing_spec.items:
-            for idx, item in enumerate(pricing_spec.items):
-                is_featured = idx == 1
-                border_cls = f"ring-2 ring-offset-2" if is_featured else "border border-slate-200"
-                ring_style = f"ring-color: {p_col};" if is_featured else ""
-                pricing_html += f"""
-                <div class="p-8 bg-white rounded-2xl shadow-sm flex flex-col justify-between {border_cls}" style="{ring_style}">
-                    <div>
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-bold text-slate-900">{item.title}</h3>
-                            {f'<span class="text-xs px-2.5 py-1 rounded-full font-semibold text-white" style="background-color: {p_col}">Popular</span>' if is_featured else ''}
-                        </div>
-                        <div class="mb-4">
-                            <span class="text-4xl font-extrabold text-slate-900">{item.badge or '$99/mo'}</span>
-                        </div>
-                        <p class="text-sm text-slate-600 mb-6">{item.description}</p>
-                        <ul class="space-y-3 text-sm text-slate-600 mb-8">
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Full platform access</li>
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Standard integrations</li>
-                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Priority email support</li>
-                        </ul>
-                    </div>
-                    <a href="#contact" class="block w-full text-center py-2.5 px-4 rounded-lg font-semibold text-sm transition-all {'text-white' if is_featured else 'text-slate-800 bg-slate-100 hover:bg-slate-200'}" style="{'background-color: ' + p_col if is_featured else ''}">Choose {item.title}</a>
-                </div>"""
-
-        # Hero Spec
-        hero_spec = next((s for s in plan.sections if s.type == "hero"), None)
-        hero_title = hero_spec.title if hero_spec else plan.business_name
-        hero_sub = hero_spec.subtitle if hero_spec else plan.summary
-
-        # About Spec
-        about_spec = next((s for s in plan.sections if s.type == "about"), None)
-        about_title = about_spec.title if about_spec else f"About {plan.business_name}"
-        about_sub = about_spec.subtitle if about_spec else plan.summary
-
-        # Contact Spec
-        contact_spec = next((s for s in plan.sections if s.type == "contact"), None)
-        contact_title = contact_spec.title if contact_spec else "Get In Touch"
-        contact_sub = contact_spec.subtitle if contact_spec else "Send us a message and our team will get back to you shortly."
-
-        html = f"""<!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{plan.seo_meta.get("title", plan.business_name)}</title>
-    <meta name="description" content="{plan.seo_meta.get("description", plan.summary)}">
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons CDN -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body class="bg-white text-slate-800 antialiased font-sans flex flex-col min-h-screen">
-
-    <!-- Header / Navbar -->
-    <header class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-100">
+        return f"""
+    <!-- Global Header / Navigation -->
+    <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <a href="#" class="flex items-center space-x-2">
-                    <img src="{assets.logo.url}" alt="{plan.business_name} Logo" class="h-9 w-auto">
-                </a>
-            </div>
+            <a href="index.html" class="flex items-center space-x-2">
+                <img src="{assets.logo.url}" alt="{plan.business_name} Logo" class="h-9 w-auto">
+            </a>
 
-            <!-- Desktop Nav -->
+            <!-- Desktop Navigation -->
             <nav class="hidden md:flex items-center space-x-8">
                 {nav_desktop}
             </nav>
 
-            <!-- Mobile Hamburger Button -->
-            <button id="mobileMenuBtn" aria-label="Toggle Navigation" class="md:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+            <!-- Mobile Hamburger Toggle -->
+            <button id="mobileMenuBtn" aria-label="Toggle Navigation" class="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors">
                 <i data-lucide="Menu" class="w-6 h-6"></i>
             </button>
         </div>
 
         <!-- Mobile Drawer -->
-        <div id="mobileDrawer" class="hidden md:hidden border-b border-slate-200 bg-white px-4 pt-2 pb-6 space-y-3">
+        <div id="mobileDrawer" class="hidden md:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3">
             {nav_mobile}
         </div>
-    </header>
+    </header>"""
 
-    <main class="flex-grow">
+    def _render_footer(self, plan: WebsitePlan, pages: List[str]) -> str:
+        footer_links = "".join([f'<a href="{"index.html" if p.lower() == "home" else self._slugify(p) + ".html"}" class="hover:text-white transition-colors">{p}</a>\n' for p in pages])
+        return f"""
+    <!-- Global Footer -->
+    <footer class="bg-slate-900 text-slate-400 py-14 border-t border-slate-800 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex flex-col md:flex-row justify-between items-center space-y-6 md:space-y-0">
+                <div class="space-y-2 text-center md:text-left">
+                    <span class="text-white font-extrabold text-xl tracking-tight">{plan.business_name}</span>
+                    <p class="text-xs text-slate-500 max-w-sm">{plan.tagline or plan.summary[:100]}</p>
+                </div>
+                <div class="flex flex-wrap justify-center gap-6 text-sm font-medium">
+                    {footer_links}
+                </div>
+            </div>
+            <div class="border-t border-slate-800 mt-10 pt-8 flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500 gap-4">
+                <p>© {plan.business_name}. All rights reserved. Powered by AI Website Builder Agent.</p>
+                <div class="flex space-x-4">
+                    <a href="contact.html" class="hover:text-slate-300">Privacy Policy</a>
+                    <a href="contact.html" class="hover:text-slate-300">Terms of Service</a>
+                </div>
+            </div>
+        </div>
+    </footer>"""
+
+    def _render_multipage_html(
+        self,
+        project_id: str,
+        plan: WebsitePlan,
+        assets: AssetManifest,
+        page_name: str,
+        all_pages: List[str]
+    ) -> str:
+        """Renders specialized HTML for a dedicated sub-page in a multi-page site."""
+        p_col = plan.color_scheme.primary
+        s_col = plan.color_scheme.secondary
+        p_lower = page_name.lower()
+
+        header_html = self._render_header(plan, assets, page_name, all_pages)
+        footer_html = self._render_footer(plan, all_pages)
+
+        hero_img = next((img.url for img in assets.images if img.type == "hero_image"), "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1600&q=80")
+        about_img = next((img.url for img in assets.images if img.type == "about_image"), "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80")
+        features_img = next((img.url for img in assets.images if img.type == "feature_image"), "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80")
+
+        # Page-specific Body Content
+        body_content = ""
+
+        if p_lower == "home":
+            # Multi-page Home Page
+            body_content = f"""
         <!-- Hero Section -->
-        <section id="hero" class="relative overflow-hidden pt-12 pb-20 lg:pt-20 lg:pb-28 bg-gradient-to-b from-slate-50 to-white">
+        <section class="relative pt-16 pb-24 lg:pt-24 lg:pb-32 bg-gradient-to-b from-slate-50 to-white overflow-hidden">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
                     <div class="lg:col-span-7 space-y-6">
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider text-slate-800 bg-white border border-slate-200 shadow-sm">
-                            <i data-lucide="Sparkles" class="w-3.5 h-3.5 mr-1.5" style="color: {p_col}"></i>
-                            {hero_spec.badge if hero_spec and hero_spec.badge else plan.industry}
+                        <span class="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider text-slate-800 bg-white border border-slate-200 shadow-sm">
+                            <i data-lucide="Sparkles" class="w-3.5 h-3.5 mr-2" style="color: {p_col}"></i>
+                            {plan.industry}
                         </span>
-                        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 tracking-tight leading-tight">
-                            {hero_title}
+                        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 tracking-tight leading-tight">
+                            {plan.tagline or f"Transforming {plan.industry} with {plan.business_name}"}
                         </h1>
-                        <p class="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl">
-                            {hero_sub}
+                        <p class="text-lg text-slate-600 leading-relaxed max-w-2xl">
+                            {plan.summary}
                         </p>
                         <div class="flex flex-col sm:flex-row gap-4 pt-4">
-                            <a href="#contact" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-semibold text-white rounded-xl shadow-md hover:opacity-95 transition-all" style="background-color: {p_col}">
+                            <a href="contact.html" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-bold text-white rounded-xl shadow-md hover:opacity-95 transition-all" style="background-color: {p_col}">
                                 Get In Touch <i data-lucide="ArrowRight" class="w-4 h-4 ml-2"></i>
                             </a>
-                            <a href="#features" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all">
+                            <a href="services.html" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all">
                                 Explore Services
                             </a>
                         </div>
                     </div>
                     <div class="lg:col-span-5">
-                        <div class="relative mx-auto rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
-                            <img src="{hero_img}" alt="{plan.business_name} Hero" class="w-full h-80 sm:h-96 object-cover transform hover:scale-105 transition-transform duration-500">
+                        <div class="rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
+                            <img src="{hero_img}" alt="{plan.business_name} Hero" class="w-full h-96 object-cover transform hover:scale-105 transition-transform duration-500">
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Features / Capabilities Section -->
-        <section id="features" class="py-20 bg-white border-t border-slate-100">
+        <!-- Services Preview Section -->
+        <section class="py-20 bg-white border-t border-slate-100">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center max-w-3xl mx-auto mb-16">
-                    <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">{features_spec.badge if features_spec and features_spec.badge else "Capabilities"}</span>
-                    <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-2 mb-4">{features_spec.title if features_spec else "Core Capabilities"}</h2>
-                    <p class="text-slate-600">{features_spec.subtitle if features_spec else "Purpose-built solutions tailored to your unique objectives."}</p>
+                <div class="flex flex-col md:flex-row md:items-end justify-between mb-12">
+                    <div>
+                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">What We Offer</span>
+                        <h2 class="text-3xl font-extrabold text-slate-900 mt-1">Core Services & Capabilities</h2>
+                    </div>
+                    <a href="services.html" class="mt-4 md:mt-0 inline-flex items-center text-sm font-bold hover:underline" style="color: {p_col}">
+                        View All Services <i data-lucide="ArrowRight" class="w-4 h-4 ml-1"></i>
+                    </a>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                    {features_html}
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Quality & Reliability</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Engineered with uncompromising precision ensuring long-term value and operational excellence.</p>
+                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
+                    </div>
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="Zap" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Fast Execution</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Accelerate project delivery through streamlined modern methodologies and seasoned specialists.</p>
+                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
+                    </div>
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200/60 hover:shadow-md transition-shadow">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="Headphones" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Dedicated Advisory</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed mb-4">Direct access to dedicated experts committed to your continuous satisfaction and milestones.</p>
+                        <a href="services.html" class="text-xs font-bold hover:underline" style="color: {p_col}">Learn more →</a>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- About Section -->
-        <section id="about" class="py-20 bg-slate-50 border-t border-slate-100">
+        <!-- About Teaser -->
+        <section class="py-20 bg-slate-50 border-t border-slate-100">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
                     <div class="lg:col-span-6">
-                        <img src="{about_img}" alt="About {plan.business_name}" class="rounded-2xl shadow-xl w-full h-96 object-cover">
+                        <img src="{about_img}" alt="About {plan.business_name}" class="rounded-2xl shadow-xl w-full h-80 object-cover">
                     </div>
                     <div class="lg:col-span-6 space-y-6">
-                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Our Mission</span>
-                        <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900">{about_title}</h2>
-                        <p class="text-slate-600 leading-relaxed">{about_sub}</p>
+                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Our Foundation</span>
+                        <h2 class="text-3xl font-extrabold text-slate-900">Setting the Benchmark in {plan.industry}</h2>
+                        <p class="text-slate-600 leading-relaxed">
+                            {plan.summary}
+                        </p>
+                        <a href="about.html" class="inline-flex items-center px-6 py-3 rounded-xl font-bold text-sm text-white shadow-sm hover:opacity-95" style="background-color: {p_col}">
+                            Read Our Story <i data-lucide="ArrowRight" class="w-4 h-4 ml-2"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+"""
+
+        elif "about" in p_lower:
+            # Dedicated About Page
+            body_content = f"""
+        <section class="py-16 lg:py-24 bg-gradient-to-b from-slate-50 to-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+                    <span class="text-xs font-bold uppercase tracking-wider px-3 py-1 bg-white rounded-full border border-slate-200" style="color: {p_col}">Our Story & Heritage</span>
+                    <h1 class="text-4xl sm:text-5xl font-black text-slate-900">About {plan.business_name}</h1>
+                    <p class="text-lg text-slate-600 leading-relaxed">
+                        Dedicated to delivering extraordinary outcomes in the {plan.industry} industry with integrity, innovation, and client-first values.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center mb-20">
+                    <div class="lg:col-span-6">
+                        <img src="{about_img}" alt="About {plan.business_name}" class="rounded-2xl shadow-2xl w-full h-[450px] object-cover border-4 border-white">
+                    </div>
+                    <div class="lg:col-span-6 space-y-6">
+                        <h2 class="text-3xl font-extrabold text-slate-900">Our Mission & Purpose</h2>
+                        <p class="text-slate-600 leading-relaxed text-base">
+                            At {plan.business_name}, we believe in transforming client expectations into tangible results. Whether working on complex enterprise undertakings or bespoke assignments, our team brings disciplined execution and passion to every project.
+                        </p>
                         <div class="grid grid-cols-2 gap-6 pt-4">
-                            <div class="p-4 bg-white rounded-xl border border-slate-100 shadow-sm">
-                                <p class="text-3xl font-extrabold text-slate-900" style="color: {p_col}">99.9%</p>
-                                <p class="text-xs text-slate-500 font-medium mt-1">Operational Reliability</p>
+                            <div class="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                                <span class="text-3xl font-black" style="color: {p_col}">99.9%</span>
+                                <p class="text-xs text-slate-500 font-semibold mt-1">Client Satisfaction</p>
                             </div>
-                            <div class="p-4 bg-white rounded-xl border border-slate-100 shadow-sm">
-                                <p class="text-3xl font-extrabold text-slate-900" style="color: {p_col}">100+</p>
-                                <p class="text-xs text-slate-500 font-medium mt-1">Enterprise Partners</p>
+                            <div class="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                                <span class="text-3xl font-black" style="color: {p_col}">24/7</span>
+                                <p class="text-xs text-slate-500 font-semibold mt-1">Operational Support</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Values Grid -->
+                <div class="bg-slate-900 text-white rounded-3xl p-10 lg:p-14 mb-16">
+                    <div class="max-w-2xl mb-10">
+                        <span class="text-xs font-bold uppercase tracking-wider text-blue-400">Core Principles</span>
+                        <h2 class="text-3xl font-extrabold text-white mt-2">What We Stand For</h2>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        <div class="space-y-3">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">1</div>
+                            <h3 class="text-lg font-bold text-white">Uncompromising Quality</h3>
+                            <p class="text-xs text-slate-400 leading-relaxed">Every deliverable is scrutinized against strict quality standards before delivery.</p>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">2</div>
+                            <h3 class="text-lg font-bold text-white">Radical Transparency</h3>
+                            <p class="text-xs text-slate-400 leading-relaxed">Direct communication, clear milestone tracking, and honest collaboration.</p>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">3</div>
+                            <h3 class="text-lg font-bold text-white">Client-Centric Innovation</h3>
+                            <p class="text-xs text-slate-400 leading-relaxed">Adapting cutting-edge tools to deliver real-world business advantages.</p>
                         </div>
                     </div>
                 </div>
             </div>
         </section>
+"""
 
-        <!-- Testimonials Section -->
-        <section id="testimonials" class="py-20 bg-white border-t border-slate-100">
+        elif "service" in p_lower:
+            # Dedicated Services Page
+            body_content = f"""
+        <section class="py-16 lg:py-24 bg-gradient-to-b from-slate-50 to-white">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center max-w-3xl mx-auto mb-16">
-                    <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Testimonials</span>
-                    <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-2 mb-4">{test_spec.title if test_spec else "What Clients Say"}</h2>
-                    <p class="text-slate-600">{test_spec.subtitle if test_spec else "Feedback from organizations that rely on our expertise."}</p>
+                <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+                    <span class="text-xs font-bold uppercase tracking-wider px-3 py-1 bg-white rounded-full border border-slate-200" style="color: {p_col}">Capabilities & Solutions</span>
+                    <h1 class="text-4xl sm:text-5xl font-black text-slate-900">Our Services</h1>
+                    <p class="text-lg text-slate-600 leading-relaxed">
+                        Comprehensive solutions engineered specifically for the {plan.industry} landscape.
+                    </p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-                    {testimonials_html}
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
+                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="Layers" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900">Custom Engineering</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Tailor-made solutions designed from the ground up to match your distinct functional requirements.</p>
+                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Full-lifecycle consultation</li>
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Iterative design reviews</li>
+                        </ul>
+                    </div>
+
+                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="TrendingUp" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900">Optimization & Scale</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Modernize workflows and enhance operational efficiency with scalable modern architectures.</p>
+                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Performance benchmarking</li>
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Continuous optimization</li>
+                        </ul>
+                    </div>
+
+                    <div class="p-8 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all space-y-4">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900">Compliance & Security</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Rigorous security audits and industry compliance built directly into every operational layer.</p>
+                        <ul class="text-xs text-slate-500 space-y-2 pt-2 border-t border-slate-100">
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Secure API handlers</li>
+                            <li class="flex items-center"><i data-lucide="Check" class="w-4 h-4 mr-2 text-emerald-500"></i> Data encryption standards</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Call to action card -->
+                <div class="p-10 rounded-3xl bg-slate-900 text-white flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div>
+                        <h3 class="text-2xl font-bold text-white">Need a customized proposal?</h3>
+                        <p class="text-xs text-slate-400 mt-1">Get in touch with our specialists for a detailed scope of work.</p>
+                    </div>
+                    <a href="contact.html" class="px-6 py-3 rounded-xl font-bold text-sm text-white shadow-md hover:opacity-95" style="background-color: {p_col}">
+                        Request Proposal
+                    </a>
                 </div>
             </div>
         </section>
+"""
 
-        <!-- Pricing Section -->
-        <section id="pricing" class="py-20 bg-slate-50 border-t border-slate-100">
+        elif "portfolio" in p_lower or "project" in p_lower or "gallery" in p_lower:
+            # Dedicated Portfolio / Projects Page
+            body_content = f"""
+        <section class="py-16 lg:py-24 bg-gradient-to-b from-slate-50 to-white">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center max-w-3xl mx-auto mb-16">
-                    <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Transparent Pricing</span>
-                    <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-2 mb-4">{pricing_spec.title if pricing_spec else "Plans & Packages"}</h2>
-                    <p class="text-slate-600">{pricing_spec.subtitle if pricing_spec else "Straightforward tiers designed for transparent value."}</p>
+                <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+                    <span class="text-xs font-bold uppercase tracking-wider px-3 py-1 bg-white rounded-full border border-slate-200" style="color: {p_col}">Featured Works</span>
+                    <h1 class="text-4xl sm:text-5xl font-black text-slate-900">Portfolio & Case Studies</h1>
+                    <p class="text-lg text-slate-600 leading-relaxed">
+                        A curated showcase of successful deliveries and high-impact projects by {plan.business_name}.
+                    </p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-                    {pricing_html}
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-20">
+                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
+                        <img src="{hero_img}" alt="Project 1" class="w-full h-56 object-cover">
+                        <div class="p-6 space-y-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-700">Flagship Execution</span>
+                            <h3 class="text-lg font-bold text-slate-900">Metropolitan Development</h3>
+                            <p class="text-xs text-slate-500 leading-relaxed">Comprehensive turnkey delivery completed on time and exceeding benchmark performance.</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
+                        <img src="{features_img}" alt="Project 2" class="w-full h-56 object-cover">
+                        <div class="p-6 space-y-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">Enterprise Scale</span>
+                            <h3 class="text-lg font-bold text-slate-900">Modern Infrastructure</h3>
+                            <p class="text-xs text-slate-500 leading-relaxed">State-of-the-art implementation engineered for multi-tenant scalability.</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all">
+                        <img src="{about_img}" alt="Project 3" class="w-full h-56 object-cover">
+                        <div class="p-6 space-y-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-50 text-purple-700">Custom Bespoke</span>
+                            <h3 class="text-lg font-bold text-slate-900">Bespoke Client Initiative</h3>
+                            <p class="text-xs text-slate-500 leading-relaxed">Unique handcrafted craftsmanship aligned to the highest tier of aesthetic elegance.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
+"""
 
-        <!-- Interactive Contact Section with Functional Submission -->
-        <section id="contact" class="py-20 bg-white border-t border-slate-100">
+        else:
+            # Dedicated Contact Page (and default for any other custom page)
+            body_content = f"""
+        <section class="py-16 lg:py-24 bg-gradient-to-b from-slate-50 to-white">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16 space-y-4">
+                    <span class="text-xs font-bold uppercase tracking-wider px-3 py-1 bg-white rounded-full border border-slate-200" style="color: {p_col}">Get In Touch</span>
+                    <h1 class="text-4xl sm:text-5xl font-black text-slate-900">Contact Us</h1>
+                    <p class="text-lg text-slate-600 leading-relaxed">
+                        Have a question or looking to begin a new engagement? Send us a message and our team will get back to you promptly.
+                    </p>
+                </div>
+
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-12">
-                    <div class="lg:col-span-5 space-y-6">
-                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Direct Inquiries</span>
-                        <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900">{contact_title}</h2>
-                        <p class="text-slate-600">{contact_sub}</p>
-                        <div class="space-y-4 pt-4 text-sm text-slate-600">
-                            <div class="flex items-center space-x-3">
-                                <div class="w-10 h-10 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700">
-                                    <i data-lucide="Mail" class="w-5 h-5"></i>
+                    <div class="lg:col-span-5 space-y-8">
+                        <div class="bg-slate-50 p-8 rounded-2xl border border-slate-200 space-y-6">
+                            <h3 class="text-xl font-bold text-slate-900">Direct Inquiries</h3>
+                            <div class="space-y-4 text-sm text-slate-600">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                        <i data-lucide="Mail" class="w-5 h-5"></i>
+                                    </div>
+                                    <div>
+                                        <span class="block text-[10px] font-bold text-slate-400 uppercase">Email</span>
+                                        <span class="font-semibold text-slate-900">{plan.contact_email or 'contact@company.com'}</span>
+                                    </div>
                                 </div>
-                                <span>{plan.contact_email or "contact@company.com"}</span>
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                        <i data-lucide="Phone" class="w-5 h-5"></i>
+                                    </div>
+                                    <div>
+                                        <span class="block text-[10px] font-bold text-slate-400 uppercase">Phone</span>
+                                        <span class="font-semibold text-slate-900">{plan.contact_phone or '+1 (555) 234-5678'}</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                        <i data-lucide="Clock" class="w-5 h-5"></i>
+                                    </div>
+                                    <div>
+                                        <span class="block text-[10px] font-bold text-slate-400 uppercase">Business Hours</span>
+                                        <span class="font-semibold text-slate-900">Mon - Fri: 9:00 AM - 6:00 PM</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="flex items-center space-x-3">
-                                <div class="w-10 h-10 rounded-lg flex items-center justify-center bg-slate-100 text-slate-700">
-                                    <i data-lucide="Phone" class="w-5 h-5"></i>
-                                </div>
-                                <span>{plan.contact_phone or "+1 (555) 019-2834"}</span>
+                        </div>
+
+                        <!-- PHP Backend notice badge -->
+                        <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start space-x-3 text-xs text-emerald-800">
+                            <i data-lucide="ShieldCheck" class="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+                            <div>
+                                <span class="font-bold block">Live Verified Backend</span>
+                                <span>Submissions are processed in real-time by the validated PHP backend with database persistence.</span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Live Contact Form Component -->
+                    <!-- Contact Form Card -->
                     <div class="lg:col-span-7">
-                        <div class="bg-slate-50 p-8 sm:p-10 rounded-2xl border border-slate-200 shadow-sm">
+                        <div class="bg-white p-8 sm:p-10 rounded-3xl border border-slate-200 shadow-xl">
                             <form id="contactForm" class="space-y-6" novalidate>
                                 <input type="hidden" id="projectIdField" value="{project_id}">
                                 <!-- Anti-spam honeypot -->
@@ -320,35 +515,34 @@ class DesignAgent:
 
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                     <div>
-                                        <label for="senderName" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Your Name *</label>
-                                        <input type="text" id="senderName" required placeholder="Jane Doe" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+                                        <label for="senderName" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Full Name *</label>
+                                        <input type="text" id="senderName" required placeholder="Alex Morgan" class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
                                     </div>
                                     <div>
                                         <label for="senderEmail" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Email Address *</label>
-                                        <input type="email" id="senderEmail" required placeholder="jane@example.com" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+                                        <input type="email" id="senderEmail" required placeholder="alex@example.com" class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
                                     </div>
                                 </div>
 
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                     <div>
                                         <label for="senderPhone" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Phone Number</label>
-                                        <input type="tel" id="senderPhone" placeholder="+1 (555) 000-0000" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+                                        <input type="tel" id="senderPhone" placeholder="+1 (555) 000-0000" class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
                                     </div>
                                     <div>
                                         <label for="senderSubject" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Subject</label>
-                                        <input type="text" id="senderSubject" placeholder="Project inquiry" class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
+                                        <input type="text" id="senderSubject" placeholder="Project inquiry" class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm">
                                     </div>
                                 </div>
 
                                 <div>
                                     <label for="senderMessage" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Your Message *</label>
-                                    <textarea id="senderMessage" rows="4" required placeholder="Tell us about your project or inquiry..." class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"></textarea>
+                                    <textarea id="senderMessage" rows="5" required placeholder="Tell us about your project requirements or question..." class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"></textarea>
                                 </div>
 
-                                <!-- Live Status Notification Banner -->
-                                <div id="formStatus" class="hidden p-4 rounded-lg text-sm font-medium"></div>
+                                <div id="formStatus" class="hidden p-4 rounded-xl text-sm font-medium"></div>
 
-                                <button type="submit" id="submitBtn" class="w-full py-3.5 px-6 rounded-xl font-bold text-white shadow-md hover:opacity-95 transition-all flex items-center justify-center space-x-2" style="background-color: {p_col}">
+                                <button type="submit" id="submitBtn" class="w-full py-4 px-6 rounded-xl font-bold text-white shadow-lg hover:opacity-95 transition-all flex items-center justify-center space-x-2" style="background-color: {p_col}">
                                     <span>Send Message</span>
                                     <i data-lucide="Send" class="w-4 h-4 ml-1"></i>
                                 </button>
@@ -358,28 +552,29 @@ class DesignAgent:
                 </div>
             </div>
         </section>
+"""
+
+        return f"""<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{page_name} | {plan.business_name}</title>
+    <meta name="description" content="{plan.seo_meta.get("description", plan.summary)}">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-white text-slate-800 antialiased font-sans flex flex-col min-h-screen">
+    {header_html}
+
+    <main class="flex-grow">
+        {body_content}
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-slate-900 text-slate-400 py-12 border-t border-slate-800">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-                <div class="flex items-center space-x-3">
-                    <span class="text-white font-bold text-lg">{plan.business_name}</span>
-                </div>
-                <div class="flex space-x-6 text-sm">
-                    <a href="#hero" class="hover:text-white transition-colors">Home</a>
-                    <a href="#features" class="hover:text-white transition-colors">Services</a>
-                    <a href="#about" class="hover:text-white transition-colors">About</a>
-                    <a href="#pricing" class="hover:text-white transition-colors">Pricing</a>
-                    <a href="#contact" class="hover:text-white transition-colors">Contact</a>
-                </div>
-            </div>
-            <div class="border-t border-slate-800 mt-8 pt-8 text-center text-xs text-slate-500">
-                <p>© {plan.business_name}. All rights reserved. Generated by AI Website Builder Agent.</p>
-            </div>
-        </div>
-    </footer>
+    {footer_html}
 
     <!-- Initialize Lucide Icons -->
     <script>
@@ -392,26 +587,198 @@ class DesignAgent:
     <script src="main.js"></script>
 </body>
 </html>"""
-        return html
+
+    def _render_singlepage_html(self, project_id: str, plan: WebsitePlan, assets: AssetManifest) -> str:
+        """Renders comprehensive, single-page landing page."""
+        p_col = plan.color_scheme.primary
+        s_col = plan.color_scheme.secondary
+        hero_img = next((img.url for img in assets.images if img.type == "hero_image"), "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1600&q=80")
+        about_img = next((img.url for img in assets.images if img.type == "about_image"), "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1200&q=80")
+
+        return f"""<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{plan.seo_meta.get("title", plan.business_name)}</title>
+    <meta name="description" content="{plan.seo_meta.get("description", plan.summary)}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-white text-slate-800 antialiased font-sans flex flex-col min-h-screen">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <a href="#" class="flex items-center space-x-2">
+                <img src="{assets.logo.url}" alt="{plan.business_name} Logo" class="h-9 w-auto">
+            </a>
+
+            <nav class="hidden md:flex items-center space-x-8">
+                <a href="#hero" class="text-sm font-medium text-slate-600 hover:text-slate-900">Home</a>
+                <a href="#services" class="text-sm font-medium text-slate-600 hover:text-slate-900">Services</a>
+                <a href="#about" class="text-sm font-medium text-slate-600 hover:text-slate-900">About</a>
+                <a href="#contact" class="inline-flex items-center px-5 py-2 text-sm font-bold text-white rounded-xl shadow-sm hover:opacity-95" style="background-color: {p_col}">Contact</a>
+            </nav>
+
+            <button id="mobileMenuBtn" aria-label="Toggle Navigation" class="md:hidden p-2 rounded-xl text-slate-700 hover:bg-slate-100">
+                <i data-lucide="Menu" class="w-6 h-6"></i>
+            </button>
+        </div>
+
+        <div id="mobileDrawer" class="hidden md:hidden border-b border-slate-200 bg-white px-4 pt-3 pb-6 space-y-3">
+            <a href="#hero" class="block px-3 py-2 text-base font-medium text-slate-700">Home</a>
+            <a href="#services" class="block px-3 py-2 text-base font-medium text-slate-700">Services</a>
+            <a href="#about" class="block px-3 py-2 text-base font-medium text-slate-700">About</a>
+            <a href="#contact" class="block px-4 py-2 text-base font-bold text-white rounded-xl text-center" style="background-color: {p_col}">Contact</a>
+        </div>
+    </header>
+
+    <main class="flex-grow">
+        <!-- Hero Section -->
+        <section id="hero" class="pt-16 pb-24 lg:pt-24 lg:pb-32 bg-gradient-to-b from-slate-50 to-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                    <div class="lg:col-span-7 space-y-6">
+                        <span class="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider text-slate-800 bg-white border border-slate-200 shadow-sm">
+                            <i data-lucide="Sparkles" class="w-3.5 h-3.5 mr-2" style="color: {p_col}"></i>
+                            {plan.industry}
+                        </span>
+                        <h1 class="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 tracking-tight leading-tight">
+                            {plan.tagline or plan.business_name}
+                        </h1>
+                        <p class="text-lg text-slate-600 leading-relaxed max-w-2xl">
+                            {plan.summary}
+                        </p>
+                        <div class="flex flex-col sm:flex-row gap-4 pt-4">
+                            <a href="#contact" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-bold text-white rounded-xl shadow-md hover:opacity-95" style="background-color: {p_col}">
+                                Get In Touch <i data-lucide="ArrowRight" class="w-4 h-4 ml-2"></i>
+                            </a>
+                            <a href="#services" class="inline-flex items-center justify-center px-7 py-3.5 text-base font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50">
+                                Explore Services
+                            </a>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-5">
+                        <div class="rounded-2xl overflow-hidden shadow-2xl border-4 border-white">
+                            <img src="{hero_img}" alt="{plan.business_name}" class="w-full h-96 object-cover">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Services Section -->
+        <section id="services" class="py-20 bg-white border-t border-slate-100">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Our Services</span>
+                    <h2 class="text-3xl font-extrabold text-slate-900 mt-1">Engineered for Excellence</h2>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="ShieldCheck" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Enterprise Reliability</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Built with rigorous standards ensuring 99.9% uptime and stability.</p>
+                    </div>
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="Zap" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Rapid Delivery</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Accelerate results with modern streamlined methodologies.</p>
+                    </div>
+                    <div class="p-8 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-5 font-bold" style="background-color: {p_col}15; color: {p_col};">
+                            <i data-lucide="Headphones" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Dedicated Support</h3>
+                        <p class="text-slate-600 text-sm leading-relaxed">Direct access to specialists around the clock for your success.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about" class="py-20 bg-slate-50 border-t border-slate-100">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                    <div class="lg:col-span-6">
+                        <img src="{about_img}" alt="About {plan.business_name}" class="rounded-2xl shadow-xl w-full h-80 object-cover">
+                    </div>
+                    <div class="lg:col-span-6 space-y-6">
+                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Who We Are</span>
+                        <h2 class="text-3xl font-extrabold text-slate-900">About {plan.business_name}</h2>
+                        <p class="text-slate-600 leading-relaxed">{plan.summary}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Contact Section -->
+        <section id="contact" class="py-20 bg-white border-t border-slate-100">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="max-w-2xl mx-auto bg-slate-50 p-8 sm:p-10 rounded-3xl border border-slate-200 shadow-xl">
+                    <div class="text-center mb-8">
+                        <span class="text-xs font-bold uppercase tracking-wider" style="color: {p_col}">Get In Touch</span>
+                        <h2 class="text-3xl font-black text-slate-900 mt-1">Contact Us</h2>
+                    </div>
+                    <form id="contactForm" class="space-y-5" novalidate>
+                        <input type="hidden" id="projectIdField" value="{project_id}">
+                        <div style="display:none;" aria-hidden="true">
+                            <input type="text" name="website_hp" id="websiteHp" tabindex="-1">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-2">Name *</label>
+                            <input type="text" id="senderName" required placeholder="Your Name" class="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-2">Email *</label>
+                            <input type="email" id="senderEmail" required placeholder="your.email@example.com" class="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-2">Message *</label>
+                            <textarea id="senderMessage" rows="4" required placeholder="How can we help?" class="w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-sm"></textarea>
+                        </div>
+                        <div id="formStatus" class="hidden p-4 rounded-xl text-sm font-medium"></div>
+                        <button type="submit" id="submitBtn" class="w-full py-3.5 px-6 rounded-xl font-bold text-white shadow-md hover:opacity-95" style="background-color: {p_col}">
+                            <span>Send Message</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-slate-900 text-slate-400 py-10 border-t border-slate-800 text-center text-xs">
+        <p>© {plan.business_name}. All rights reserved.</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {{
+            if (window.lucide) {{ window.lucide.createIcons(); }}
+        }});
+    </script>
+    <script src="main.js"></script>
+</body>
+</html>"""
 
     def _render_css(self, plan: WebsitePlan) -> str:
-        """Generates supporting CSS with design tokens."""
-        return f"""/* Custom Theme Variables & Interactions */
+        return f"""/* Theme Tokens & Micro-interactions */
 :root {{
     --primary: {plan.color_scheme.primary};
     --secondary: {plan.color_scheme.secondary};
     --accent: {plan.color_scheme.accent};
 }}
-
 html {{
     scroll-behavior: smooth;
 }}
-
 input:focus, textarea:focus {{
     border-color: var(--primary) !important;
 }}
-
-/* Clean focus outline for accessibility */
 button:focus-visible, a:focus-visible {{
     outline: 2px solid var(--primary);
     outline-offset: 2px;
@@ -419,8 +786,7 @@ button:focus-visible, a:focus-visible {{
 """
 
     def _render_js(self, project_id: str) -> str:
-        """Generates client script connecting contact form to real backend endpoint."""
-        return f"""// Client Interaction and Form Submission Logic
+        return f"""// Client Interaction & Validated Form Handler
 document.addEventListener('DOMContentLoaded', () => {{
     // Mobile navigation toggle
     const mobileBtn = document.getElementById('mobileMenuBtn');
@@ -431,7 +797,7 @@ document.addEventListener('DOMContentLoaded', () => {{
         }});
     }}
 
-    // Real Contact Form Handler
+    // Real Contact Form Handler (Supports both platform API and PHP backend)
     const form = document.getElementById('contactForm');
     const statusBox = document.getElementById('formStatus');
     const submitBtn = document.getElementById('submitBtn');
@@ -440,24 +806,23 @@ document.addEventListener('DOMContentLoaded', () => {{
         form.addEventListener('submit', async (e) => {{
             e.preventDefault();
 
-            const name = document.getElementById('senderName').value.trim();
-            const email = document.getElementById('senderEmail').value.trim();
-            const phone = document.getElementById('senderPhone').value.trim();
-            const subject = document.getElementById('senderSubject').value.trim();
-            const message = document.getElementById('senderMessage').value.trim();
-            const hp = document.getElementById('websiteHp').value;
-            const projectId = document.getElementById('projectIdField').value || '{project_id}';
+            const name = document.getElementById('senderName')?.value.trim();
+            const email = document.getElementById('senderEmail')?.value.trim();
+            const phone = document.getElementById('senderPhone')?.value.trim();
+            const subject = document.getElementById('senderSubject')?.value.trim();
+            const message = document.getElementById('senderMessage')?.value.trim();
+            const hp = document.getElementById('websiteHp')?.value;
+            const projectId = document.getElementById('projectIdField')?.value || '{project_id}';
 
-            // Validate required inputs
             if (!name || !email || !message) {{
                 showStatus('Please complete all required fields.', false);
                 return;
             }}
 
-            // Disable submit button while sending
             submitBtn.disabled = true;
             submitBtn.style.opacity = '0.6';
-            submitBtn.querySelector('span').innerText = 'Sending...';
+            const btnSpan = submitBtn.querySelector('span');
+            if (btnSpan) btnSpan.innerText = 'Sending...';
 
             try {{
                 // Submit to genuine project contact endpoint
@@ -476,8 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {{
                 }});
 
                 if (response.ok) {{
-                    const data = await response.json();
-                    showStatus('Thank you! Your message has been sent successfully.', true);
+                    showStatus('Thank you! Your message has been received successfully.', true);
                     form.reset();
                 }} else {{
                     const err = await response.json().catch(() => ({{ detail: 'Submission failed' }}));
@@ -488,7 +852,7 @@ document.addEventListener('DOMContentLoaded', () => {{
             }} finally {{
                 submitBtn.disabled = false;
                 submitBtn.style.opacity = '1';
-                submitBtn.querySelector('span').innerText = 'Send Message';
+                if (btnSpan) btnSpan.innerText = 'Send Message';
             }}
         }});
     }}

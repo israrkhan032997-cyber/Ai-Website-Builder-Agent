@@ -9,6 +9,7 @@ from backend.app.database import get_db
 from backend.app.models.project import Project
 from backend.app.models.agent_log import AgentLog
 from backend.app.models.checkpoint import Checkpoint
+from backend.app.models.website_page import WebsitePage
 from backend.app.schemas.project import NaturalLanguageEditRequest
 from backend.app.schemas.agent import WebsitePlan, AssetManifest, ValidationResult
 from backend.app.services.workspace_manager import workspace_manager
@@ -54,10 +55,11 @@ async def _add_log(
 async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(get_db)):
     """
     Executes the genuine 5-stage AI agent generation workflow:
-    1. Orchestrator: Formulates WebsitePlan
+    1. Orchestrator: Formulates WebsitePlan (supports single-page or multi-page)
     2. Asset Agent: Curates images, vector logo & icons
-    3. Design Agent: Generates modern HTML5, Tailwind CSS, and interaction scripts
-    4. Backend Agent: Implements contact submission and serverless handlers
+    3. Design Agent: Generates modern HTML5, Tailwind CSS, JS (multi-page or single-page)
+    4. Backend Agent: Generates complete PHP backend bundle (config.php, contact.php, database.sql, subscribe.php)
+       plus serverless handlers
     5. Orchestrator: Verifies output against specification
     6. Execution Agent: Saves immutable Git checkpoint
     """
@@ -80,7 +82,7 @@ async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(ge
 
         await _add_log(
             db, project_id, orchestrator_agent.AGENT_NAME, "Planning",
-            "in_progress", f"Analyzing business requirements for '{project.name}' ({project.industry})"
+            "in_progress", f"Analyzing business requirements for '{project.name}' ({project.industry}) - Architecture: {project.website_type or 'single-page'}"
         )
 
         plan, plan_msg = await orchestrator_agent.create_website_plan(
@@ -91,7 +93,9 @@ async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(ge
             style=project.style,
             primary_color=project.primary_color,
             secondary_color=project.secondary_color,
-            accent_color=project.accent_color
+            accent_color=project.accent_color,
+            website_type=project.website_type or "single-page",
+            selected_pages=project.selected_pages
         )
         project.website_plan = plan.model_dump()
         await db.commit()
@@ -131,47 +135,84 @@ async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(ge
         # -------------------------------------------------------------
         project.status = "generating_design"
         project.current_agent = design_agent.AGENT_NAME
-        project.current_step = "Coding responsive HTML5, modern Tailwind CSS, and scripts"
+        project.current_step = f"Coding responsive HTML5 ({project.website_type or 'single-page'}), modern Tailwind CSS, and scripts"
         project.progress_percentage = "60%"
         await db.commit()
 
         await _add_log(
             db, project_id, design_agent.AGENT_NAME, "Frontend Coding",
-            "in_progress", "Generating semantic markup, design tokens, and client interactions"
+            "in_progress", f"Generating semantic markup, design tokens, and client interactions for {project.website_type or 'single-page'} architecture"
         )
 
         code_files = design_agent.generate_website_bundle(
             project_id=project_id,
             plan=plan,
-            assets=assets
+            assets=assets,
+            website_type=project.website_type or "single-page",
+            selected_pages=project.selected_pages
         )
 
-        # Save files to isolated workspace
+        # Save files to isolated workspace and track WebsitePage records
+        order_idx = 0
         for file in code_files:
             workspace_manager.write_file(project_id, file.path, file.content)
+            if file.path.endswith(".html"):
+                page_slug = file.path.replace(".html", "")
+                page_title = "Home" if page_slug == "index" else page_slug.replace("-", " ").title()
+                # Check if page already recorded
+                existing_page_q = select(WebsitePage).where(
+                    WebsitePage.project_id == project_id,
+                    WebsitePage.slug == page_slug
+                )
+                existing_page = (await db.execute(existing_page_q)).scalars().first()
+                if not existing_page:
+                    wp = WebsitePage(
+                        project_id=project_id,
+                        title=page_title,
+                        slug=page_slug,
+                        file_path=file.path,
+                        is_home=(page_slug == "index"),
+                        nav_order=order_idx,
+                        order_index=order_idx
+                    )
+                    db.add(wp)
+                order_idx += 1
 
+        await db.commit()
+
+        html_files = [f.path for f in code_files if f.path.endswith('.html')]
         await _add_log(
             db, project_id, design_agent.AGENT_NAME, "Frontend Coding",
-            "success", f"Generated {len(code_files)} frontend files (index.html, styles.css, main.js).",
-            output_payload={"files": [f.path for f in code_files]}
+            "success", f"Generated {len(code_files)} frontend files ({', '.join(html_files)}, styles.css, main.js).",
+            output_payload={"files": [f.path for f in code_files], "pages": html_files}
         )
 
         # -------------------------------------------------------------
-        # STAGE 4: Backend Agent (Contact Form & Serverless Handling)
+        # STAGE 4: Backend Agent (Contact Form, PHP Backend & Serverless)
         # -------------------------------------------------------------
         project.status = "generating_backend"
         project.current_agent = backend_agent.AGENT_NAME
-        project.current_step = "Configuring contact submission endpoints and serverless routes"
+        project.current_step = "Configuring PHP backend bundle and serverless submission handlers"
         project.progress_percentage = "80%"
         await db.commit()
 
+        # 1. Full Production PHP Backend Bundle (api/config.php, api/contact.php, api/database.sql, api/subscribe.php)
+        php_files = backend_agent.generate_php_backend_bundle(
+            project_id=project_id,
+            business_name=project.name,
+            admin_email=plan.contact_email
+        )
+        for php_file in php_files:
+            workspace_manager.write_file(project_id, php_file.path, php_file.content)
+
+        # 2. Serverless route handler (Netlify / Node)
         serverless_file = backend_agent.generate_serverless_handler(project_id)
         workspace_manager.write_file(project_id, serverless_file.path, serverless_file.content)
 
         await _add_log(
             db, project_id, backend_agent.AGENT_NAME, "Backend Integration",
-            "success", "Configured live contact submission handler and Netlify serverless route.",
-            output_payload={"serverless_path": serverless_file.path}
+            "success", f"Generated complete PHP backend bundle ({len(php_files)} files: api/config.php, api/contact.php, api/database.sql, api/subscribe.php) and serverless route.",
+            output_payload={"php_files": [f.path for f in php_files], "serverless_path": serverless_file.path}
         )
 
         # -------------------------------------------------------------
@@ -277,34 +318,58 @@ async def natural_language_edit(
         "in_progress", f"Processing user request: '{instruction}'"
     )
 
-    current_html = workspace_manager.read_file(project_id, "index.html")
-
-    # Surgical replacement or enrichment based on request keywords
-    updated_html = current_html
+    # Determine target page file
+    target_page = "index.html"
     inst_lower = instruction.lower()
+    for potential_page in ["about", "services", "portfolio", "contact"]:
+        if potential_page in inst_lower:
+            if workspace_manager.file_exists(project_id, f"{potential_page}.html"):
+                target_page = f"{potential_page}.html"
+                break
 
+    current_html = workspace_manager.read_file(project_id, target_page)
+    updated_html = current_html
+
+    # Handle color/theme updates across all files
     if "color" in inst_lower or "theme" in inst_lower:
-        # Check if color hex or named color mentioned
+        import re
+        new_color = None
         if "emerald" in inst_lower or "green" in inst_lower:
-            project.primary_color = "#059669"
-            updated_html = updated_html.replace("#2563eb", "#059669")
+            new_color = "#059669"
         elif "purple" in inst_lower or "indigo" in inst_lower:
-            project.primary_color = "#6366f1"
-            updated_html = updated_html.replace("#2563eb", "#6366f1")
+            new_color = "#6366f1"
         elif "rose" in inst_lower or "red" in inst_lower:
-            project.primary_color = "#e11d48"
-            updated_html = updated_html.replace("#2563eb", "#e11d48")
+            new_color = "#e11d48"
         elif "amber" in inst_lower or "orange" in inst_lower:
-            project.primary_color = "#d97706"
-            updated_html = updated_html.replace("#2563eb", "#d97706")
+            new_color = "#d97706"
+        elif "blue" in inst_lower or "sky" in inst_lower:
+            new_color = "#2563eb"
+        elif "teal" in inst_lower or "cyan" in inst_lower:
+            new_color = "#0d9488"
+        
+        hex_match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}\b', instruction)
+        if hex_match:
+            new_color = hex_match.group(0)
+
+        if new_color:
+            old_color = project.primary_color or "#2563eb"
+            project.primary_color = new_color
+            # Replace across all web files
+            all_files = workspace_manager.list_files(project_id)
+            for f_item in all_files:
+                fpath = f_item["path"] if isinstance(f_item, dict) else str(f_item)
+                if fpath.endswith((".html", ".css", ".js")):
+                    fcontent = workspace_manager.read_file(project_id, fpath)
+                    fcontent = fcontent.replace(old_color, new_color)
+                    workspace_manager.write_file(project_id, fpath, fcontent)
+            # Re-read target page content after color replacement
+            updated_html = workspace_manager.read_file(project_id, target_page)
 
     if "headline" in inst_lower or "title" in inst_lower or "hero" in inst_lower:
-        # Check for quoted text in instruction
         import re
         quotes = re.findall(r'["\'](.*?)["\']', instruction)
         if quotes:
             new_title = quotes[0]
-            # Replace h1 content
             updated_html = re.sub(
                 r'(<h1[^>]*>)(.*?)(</h1>)',
                 rf'\g<1>{new_title}\g<3>',
@@ -313,8 +378,8 @@ async def natural_language_edit(
                 flags=re.DOTALL
             )
 
-    # Save updated file
-    workspace_manager.write_file(project_id, "index.html", updated_html)
+    # Save target file
+    workspace_manager.write_file(project_id, target_page, updated_html)
 
     # Save Git checkpoint for user iteration
     checkpoint_msg = f"refactor: {instruction[:50]}"

@@ -13,6 +13,11 @@ class ProjectCreate(BaseModel):
     secondary_color: Optional[str] = "#0f172a"
     accent_color: Optional[str] = "#38bdf8"
     logo_url: Optional[str] = None
+    website_type: Optional[str] = Field("single-page", description="Website architecture: 'single-page' or 'multi-page'")
+    selected_pages: Optional[List[str]] = Field(None, description="List of page slugs e.g. ['home', 'about', 'services', 'contact']")
+    tech_stack: Optional[str] = Field("react-php", description="Preferred technology stack: 'react-php' or 'html-tailwind-php'")
+    subdomain: Optional[str] = Field(None, description="Desired customer subdomain slug e.g. 'pepsi'")
+    custom_domain: Optional[str] = Field(None, description="Custom domain e.g. 'pepsi.com'")
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -25,6 +30,11 @@ class ProjectUpdate(BaseModel):
     accent_color: Optional[str] = None
     logo_url: Optional[str] = None
     status: Optional[str] = None
+    website_type: Optional[str] = None
+    selected_pages: Optional[List[str]] = None
+    tech_stack: Optional[str] = None
+    subdomain: Optional[str] = None
+    custom_domain: Optional[str] = None
 
 class ProjectResponse(BaseModel):
     id: str
@@ -37,6 +47,11 @@ class ProjectResponse(BaseModel):
     secondary_color: Optional[str]
     accent_color: Optional[str]
     logo_url: Optional[str]
+    website_type: str
+    selected_pages: Optional[List[str]] = None
+    tech_stack: str
+    subdomain: Optional[str] = None
+    custom_domain: Optional[str] = None
     status: str
     current_agent: Optional[str]
     current_step: Optional[str]
@@ -54,10 +69,13 @@ class ProjectResponse(BaseModel):
 class ProjectDetailResponse(ProjectResponse):
     website_plan: Optional[Dict[str, Any]] = None
     asset_manifest: Optional[Dict[str, Any]] = None
+    requirements_spec: Optional[Dict[str, Any]] = None
     submissions_count: int = 0
     checkpoints_count: int = 0
     pending_approvals_count: int = 0
+    pages_count: int = 0
 
 class NaturalLanguageEditRequest(BaseModel):
     instruction: str = Field(..., min_length=3, description="Natural language instructions describing requested changes")
     section_id: Optional[str] = Field(None, description="Optional target section ID (e.g., hero, features, contact)")
+    page_slug: Optional[str] = Field(None, description="Optional target page slug (e.g., 'about', 'services', 'contact')")

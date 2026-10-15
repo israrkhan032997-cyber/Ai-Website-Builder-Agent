@@ -3,6 +3,8 @@ from backend.app.services.git_service import git_service, GitService
 from backend.app.services.command_executor import command_executor, CommandExecutor
 from backend.app.services.ai_provider import ai_provider, AIProviderService
 from backend.app.services.deployment_service import deployment_service, DeploymentService
+from backend.app.services.conversational_assistant import conversational_assistant, ConversationalAssistant
+from backend.app.services.subdomain_service import subdomain_service, SubdomainService
 
 __all__ = [
     "workspace_manager",
@@ -14,5 +16,9 @@ __all__ = [
     "ai_provider",
     "AIProviderService",
     "deployment_service",
-    "DeploymentService"
+    "DeploymentService",
+    "conversational_assistant",
+    "ConversationalAssistant",
+    "subdomain_service",
+    "SubdomainService"
 ]

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Globe, Plus, Settings, Layers, Code, ShieldCheck } from 'lucide-react';
+import { Globe, Plus, Settings, Layers, Code, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'projects' | 'workflow' | 'preview' | 'leads';
   setActiveTab: (tab: 'dashboard' | 'projects' | 'workflow' | 'preview' | 'leads') => void;
   onOpenCreate: () => void;
+  onOpenConversationalWizard?: () => void;
   onOpenSettings: () => void;
   selectedProjectName?: string;
   hasPendingApprovals?: boolean;
@@ -14,6 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   onOpenCreate,
+  onOpenConversationalWizard,
   onOpenSettings,
   selectedProjectName,
   hasPendingApprovals,
@@ -105,11 +107,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button
-            onClick={onOpenCreate}
-            className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-all"
+            onClick={onOpenConversationalWizard || onOpenCreate}
+            className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-md shadow-blue-500/20 transition-all active:scale-95"
           >
-            <Plus className="w-4 h-4 mr-1.5" />
-            <span>New Website</span>
+            <Sparkles className="w-4 h-4 mr-1.5" />
+            <span>AI Chat Builder</span>
           </button>
         </div>
       </div>

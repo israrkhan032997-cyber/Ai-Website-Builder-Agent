@@ -12,6 +12,8 @@ import { CheckpointHistory } from './components/CheckpointHistory';
 import { CommandApprovalModal } from './components/CommandApprovalModal';
 import { DeploymentModal } from './components/DeploymentModal';
 import { SettingsModal } from './components/SettingsModal';
+import { ConversationalWizard } from './components/ConversationalWizard';
+import { LovableWorkspace } from './components/LovableWorkspace';
 
 export const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -26,7 +28,11 @@ export const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modals
+  // Modern Lovable Workspace and Conversational Wizard modes
+  const [isConversationalWizardOpen, setIsConversationalWizardOpen] = useState(false);
+  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
+
+  // Classic Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCheckpointsOpen, setIsCheckpointsOpen] = useState(false);
@@ -102,7 +108,7 @@ export const App: React.FC = () => {
     const newProject = await api.createProject(data);
     await loadProjects();
     setSelectedProject(newProject);
-    setActiveTab('workflow');
+    setIsWorkspaceOpen(true);
     // Trigger generation pipeline automatically
     handleTriggerGenerate(newProject.id);
   };
@@ -170,6 +176,7 @@ export const App: React.FC = () => {
     await api.deleteProject(id);
     if (selectedProject?.id === id) {
       setSelectedProject(null);
+      setIsWorkspaceOpen(false);
       setActiveTab('dashboard');
     }
     await loadProjects();
@@ -184,12 +191,42 @@ export const App: React.FC = () => {
 
   const hasPendingApprovals = approvals.some((a) => a.status === 'pending');
 
+  // 1. If Conversational AI Wizard is active
+  if (isConversationalWizardOpen) {
+    return (
+      <ConversationalWizard
+        onProjectCreated={(newProj) => {
+          setSelectedProject(newProj);
+          setIsConversationalWizardOpen(false);
+          setIsWorkspaceOpen(true);
+          loadProjects();
+        }}
+        onCancel={() => setIsConversationalWizardOpen(false)}
+      />
+    );
+  }
+
+  // 2. If Lovable Workspace is active for a selected project
+  if (isWorkspaceOpen && selectedProject) {
+    return (
+      <LovableWorkspace
+        project={selectedProject}
+        onBackToDashboard={() => setIsWorkspaceOpen(false)}
+        onProjectUpdated={(updated) => {
+          setSelectedProject(updated);
+          loadProjects();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 font-sans">
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenCreate={() => setIsCreateOpen(true)}
+        onOpenConversationalWizard={() => setIsConversationalWizardOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         selectedProjectName={selectedProject?.name}
         hasPendingApprovals={hasPendingApprovals}
@@ -204,6 +241,11 @@ export const App: React.FC = () => {
               setActiveTab(tab || 'preview');
             }}
             onOpenCreate={() => setIsCreateOpen(true)}
+            onOpenConversationalWizard={() => setIsConversationalWizardOpen(true)}
+            onOpenWorkspace={(proj) => {
+              setSelectedProject(proj);
+              setIsWorkspaceOpen(true);
+            }}
             onOpenEdit={(proj) => {
               setSelectedProject(proj);
               setIsEditOpen(true);

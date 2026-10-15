@@ -13,11 +13,19 @@ from backend.app.schemas.approval import (
 from backend.app.schemas.setting import (
     SettingItem, SettingsUpdate, ProviderStatus
 )
+from backend.app.schemas.chat import (
+    ChatMessageCreate, ChatMessageResponse, ConversationalStepRequest, ConversationalStepResponse, RequirementsReview
+)
+from backend.app.schemas.subdomain import (
+    SubdomainCheckRequest, SubdomainCheckResponse, SubdomainReserveRequest
+)
 
 __all__ = [
     "ProjectCreate", "ProjectUpdate", "ProjectResponse", "ProjectDetailResponse", "NaturalLanguageEditRequest",
     "WebsitePlan", "SectionSpec", "NavigationItem", "AssetItem", "AssetManifest", "CodeFile", "ValidationResult", "AgentWorkflowStatus",
     "ContactSubmissionCreate", "ContactSubmissionResponse", "ContactSubmissionStatusUpdate",
     "CommandApprovalResponse", "CommandApprovalDecision", "DeploymentApprovalRequest", "DeploymentResponse",
-    "SettingItem", "SettingsUpdate", "ProviderStatus"
+    "SettingItem", "SettingsUpdate", "ProviderStatus",
+    "ChatMessageCreate", "ChatMessageResponse", "ConversationalStepRequest", "ConversationalStepResponse", "RequirementsReview",
+    "SubdomainCheckRequest", "SubdomainCheckResponse", "SubdomainReserveRequest"
 ]

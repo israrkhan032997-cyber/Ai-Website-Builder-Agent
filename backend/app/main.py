@@ -13,7 +13,9 @@ from backend.app.routes import (
     contact_router,
     approvals_router,
     deployment_router,
-    settings_router
+    settings_router,
+    chat_router,
+    subdomains_router
 )
 
 # Configure logging
@@ -65,6 +67,8 @@ app.include_router(contact_router)
 app.include_router(approvals_router)
 app.include_router(deployment_router)
 app.include_router(settings_router)
+app.include_router(chat_router)
+app.include_router(subdomains_router)
 
 @app.get("/api/v1/health", tags=["Health"])
 @app.get("/health", tags=["Health"])

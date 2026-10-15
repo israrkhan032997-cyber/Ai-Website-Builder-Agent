@@ -5,6 +5,8 @@ from backend.app.routes.contact import router as contact_router
 from backend.app.routes.approvals import router as approvals_router
 from backend.app.routes.deployment import router as deployment_router
 from backend.app.routes.settings import router as settings_router
+from backend.app.routes.chat import router as chat_router
+from backend.app.routes.subdomains import router as subdomains_router
 
 __all__ = [
     "projects_router",
@@ -13,5 +15,7 @@ __all__ = [
     "contact_router",
     "approvals_router",
     "deployment_router",
-    "settings_router"
+    "settings_router",
+    "chat_router",
+    "subdomains_router"
 ]

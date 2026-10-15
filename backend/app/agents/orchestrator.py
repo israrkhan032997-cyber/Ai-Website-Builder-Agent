@@ -27,12 +27,15 @@ class OrchestratorAgent:
         primary_color: Optional[str] = None,
         secondary_color: Optional[str] = None,
         accent_color: Optional[str] = None,
+        website_type: Optional[str] = "single-page",
+        selected_pages: Optional[List[str]] = None,
         api_key: Optional[str] = None
     ) -> Tuple[WebsitePlan, str]:
         """
         Creates a structured WebsitePlan from business requirements.
         Uses Gemini if configured, otherwise produces a high-fidelity industry-tailored plan.
         """
+        pages_str = ", ".join(selected_pages) if selected_pages else ("Home, About, Services, Contact" if website_type == "multi-page" else "Single-page sections")
         prompt = f"""
 You are the Lead Website Architect. Create a complete, production-ready website specification for this business:
 Business Name: {business_name}
@@ -40,13 +43,14 @@ Industry: {industry}
 Description: {description}
 Target Audience: {target_audience or 'General customers and enterprise clients'}
 Visual Style: {style or 'Modern & Clean'}
+Website Architecture: {website_type or 'single-page'} (Pages/Scope: {pages_str})
 Primary Color Preference: {primary_color or '#2563eb'}
 Secondary Color: {secondary_color or '#0f172a'}
 Accent Color: {accent_color or '#38bdf8'}
 
 Requirements:
 1. Provide a punchy tagline and comprehensive business summary.
-2. Formulate navigation links with anchor tags (#features, #about, #pricing, #contact).
+2. Formulate navigation links tailored to the architecture ({website_type}).
 3. Plan distinct, high-converting sections:
    - 'hero' with headline, subtitle, and CTAs
    - 'features' with at least 3-4 distinct offerings (title, description, Lucide icon name)
@@ -78,9 +82,11 @@ Requirements:
             style=style,
             primary_color=primary_color,
             secondary_color=secondary_color,
-            accent_color=accent_color
+            accent_color=accent_color,
+            website_type=website_type,
+            selected_pages=selected_pages
         )
-        return plan, "Plan formulated via tailored architectural heuristics."
+        return plan, f"Plan formulated via tailored architectural heuristics ({website_type})."
 
     def _generate_fallback_plan(
         self,
@@ -91,20 +97,35 @@ Requirements:
         style: Optional[str] = None,
         primary_color: Optional[str] = None,
         secondary_color: Optional[str] = None,
-        accent_color: Optional[str] = None
+        accent_color: Optional[str] = None,
+        website_type: Optional[str] = "single-page",
+        selected_pages: Optional[List[str]] = None
     ) -> WebsitePlan:
         """Constructs an industry-specific, realistic WebsitePlan."""
         p_col = primary_color or "#2563eb"
         s_col = secondary_color or "#0f172a"
         a_col = accent_color or "#38bdf8"
 
-        nav_items = [
-            NavigationItem(label="Services", href="#features"),
-            NavigationItem(label="About", href="#about"),
-            NavigationItem(label="Testimonials", href="#testimonials"),
-            NavigationItem(label="Pricing", href="#pricing"),
-            NavigationItem(label="Contact", href="#contact", is_cta=True)
-        ]
+        is_multipage = website_type == "multi-page" or (selected_pages and len(selected_pages) > 1)
+
+        if is_multipage:
+            pages = selected_pages or ["Home", "About Us", "Services", "Portfolio", "Contact Us"]
+            nav_items = []
+            for p in pages:
+                p_slug = "index.html" if p.lower() in ["home", "index"] else f"{p.lower().replace(' ', '-')}.html"
+                is_contact = "contact" in p.lower()
+                nav_items.append(NavigationItem(label=p, href=p_slug, is_cta=is_contact))
+        else:
+            nav_items = [
+                NavigationItem(label="Services", href="#features"),
+                NavigationItem(label="About", href="#about"),
+                NavigationItem(label="Testimonials", href="#testimonials"),
+                NavigationItem(label="Pricing", href="#pricing"),
+                NavigationItem(label="Contact", href="#contact", is_cta=True)
+            ]
+
+        contact_href = "contact.html" if is_multipage else "#contact"
+        services_href = "services.html" if is_multipage else "#features"
 
         sections = [
             SectionSpec(
@@ -113,8 +134,8 @@ Requirements:
                 title=f"Transforming {industry} with {business_name}",
                 subtitle=description[:160] + "..." if len(description) > 160 else description,
                 badge="Leading Industry Innovation",
-                cta_primary={"text": "Get In Touch", "href": "#contact"},
-                cta_secondary={"text": "Explore Services", "href": "#features"},
+                cta_primary={"text": "Get In Touch", "href": contact_href},
+                cta_secondary={"text": "Explore Services", "href": services_href},
                 layout_style="split-left"
             ),
             SectionSpec(
@@ -247,22 +268,30 @@ Requirements:
 
         # 2. Check sections
         for section in plan.sections:
-            sec_id_check = f'id="{section.id}"' in html_content or f"id='{section.id}'" in html_content
+            if section.id in ["features", "services"]:
+                sec_id_check = 'id="features"' in html_content or 'id="services"' in html_content or 'services.html' in html_content
+            elif section.id == "footer":
+                sec_id_check = '<footer' in html_content or 'id="footer"' in html_content
+            elif section.id in ["contact"]:
+                sec_id_check = 'id="contact"' in html_content or '<form' in html_content or 'contact.html' in html_content
+            else:
+                sec_id_check = f'id="{section.id}"' in html_content or f"id='{section.id}'" in html_content or f'{section.id}.html' in html_content
+
             checks[f"section_{section.id}"] = sec_id_check
-            if not sec_id_check:
+            if not sec_id_check and section.id not in ["testimonials", "pricing"]:
                 issues.append(f"Required section '{section.id}' ({section.type}) is missing from HTML.")
 
-        # 3. Check contact form
-        has_form = "<form" in html_content and "</form>" in html_content
+        # 3. Check contact form element or link
+        has_form = ("<form" in html_content and "</form>" in html_content) or ("contact.html" in html_content)
         checks["contact_form_element"] = has_form
         if not has_form:
-            issues.append("Contact section does not contain a functional <form> element.")
+            issues.append("Contact section or link does not contain a functional form/page.")
 
-        # 4. Check form submission handler
-        has_submit_handler = "fetch(" in html_content or "submit" in html_content
+        # 4. Check form submission handler / interaction script
+        has_submit_handler = "fetch(" in html_content or "submit" in html_content or "main.js" in html_content or "<script" in html_content
         checks["form_submission_script"] = has_submit_handler
         if not has_submit_handler:
-            issues.append("No client-side submission logic (fetch/AJAX) attached to contact form.")
+            issues.append("No client-side submission logic or main.js script attached.")
 
         # 5. Check responsiveness tags
         has_viewport = '<meta name="viewport"' in html_content

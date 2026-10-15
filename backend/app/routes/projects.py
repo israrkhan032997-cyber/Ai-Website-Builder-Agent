@@ -11,6 +11,7 @@ from backend.app.models.project import Project
 from backend.app.models.contact_submission import ContactSubmission
 from backend.app.models.checkpoint import Checkpoint
 from backend.app.models.command_approval import CommandApproval
+from backend.app.models.website_page import WebsitePage
 from backend.app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetailResponse
 )
@@ -29,6 +30,11 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
         description=data.description.strip(),
         target_audience=data.target_audience.strip() if data.target_audience else None,
         style=data.style or "Modern & Clean",
+        website_type=data.website_type or "single-page",
+        selected_pages=data.selected_pages or ["Home"],
+        tech_stack=data.tech_stack or "react-php",
+        subdomain=data.subdomain,
+        custom_domain=data.custom_domain,
         primary_color=data.primary_color or "#2563eb",
         secondary_color=data.secondary_color or "#0f172a",
         accent_color=data.accent_color or "#38bdf8",
@@ -134,6 +140,35 @@ async def get_file_content(
     content = workspace_manager.read_file(project_id, path)
     return {"path": path, "content": content}
 
+@router.get("/{project_id}/pages")
+async def get_project_pages(project_id: str, db: AsyncSession = Depends(get_db)):
+    """Retrieves all registered website pages (Home, About, Services, etc.) for this project."""
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    query = (
+        select(WebsitePage)
+        .where(WebsitePage.project_id == project_id)
+        .order_by(WebsitePage.order_index.asc(), WebsitePage.created_at.asc())
+    )
+    result = await db.execute(query)
+    pages = result.scalars().all()
+    
+    # If no pages recorded yet but index.html exists, return default
+    if not pages and workspace_manager.file_exists(project_id, "index.html"):
+        return [{
+            "id": "home",
+            "project_id": project_id,
+            "title": "Home",
+            "slug": "index",
+            "file_path": "index.html",
+            "is_home": True,
+            "order_index": 0
+        }]
+
+    return pages
+
 @router.get("/{project_id}/export")
 async def export_project_zip(project_id: str, db: AsyncSession = Depends(get_db)):
     """Creates and returns downloadable ZIP archive of the generated website."""
@@ -148,3 +183,4 @@ async def export_project_zip(project_id: str, db: AsyncSession = Depends(get_db)
         filename=f"{clean_name}-website.zip",
         media_type="application/zip"
     )
+

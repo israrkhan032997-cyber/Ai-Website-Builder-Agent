@@ -176,5 +176,60 @@ export const api = {
       method: 'POST',
     });
     return handleResponse(res);
+  },
+
+  // Multi-page Support & Code Viewing
+  async getProjectPages(id: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/projects/${id}/pages`);
+    return handleResponse<any[]>(res);
+  },
+
+  async getFileContent(id: string, path: string): Promise<{ path: string; content: string }> {
+    const res = await fetch(`${API_BASE}/projects/${id}/files/content?path=${encodeURIComponent(path)}`);
+    return handleResponse<{ path: string; content: string }>(res);
+  },
+
+  // Conversational Onboarding Chatbot
+  async sendChatMessage(payload: { project_id?: string; user_message: string; current_step?: string; collected_data?: Record<string, any> }): Promise<any> {
+    const res = await fetch(`${API_BASE}/chat/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async getChatHistory(id: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/chat/${id}/history`);
+    return handleResponse<any[]>(res);
+  },
+
+  async createProjectFromChat(collectedData: Record<string, any>): Promise<Project> {
+    const res = await fetch(`${API_BASE}/chat/create-project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collected_data: collectedData }),
+    });
+    return handleResponse<Project>(res);
+  },
+
+  // Subdomains
+  async checkSubdomain(slug: string, projectId?: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/subdomains/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, project_id: projectId }),
+    });
+    return handleResponse<any>(res);
+  },
+
+  async assignSubdomain(projectId: string, subdomain: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/subdomains/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, subdomain }),
+    });
+    return handleResponse<any>(res);
   }
 };
+

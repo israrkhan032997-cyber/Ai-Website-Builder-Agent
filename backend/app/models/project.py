@@ -16,6 +16,15 @@ class Project(Base):
     accent_color = Column(String(50), nullable=True, default="#38bdf8")
     logo_url = Column(String(500), nullable=True)
 
+    # Website Architecture: single-page or multi-page
+    website_type = Column(String(30), nullable=False, default="single-page") # "single-page" | "multi-page"
+    selected_pages = Column(JSON, nullable=True) # list of page slugs e.g. ["home", "about", "services", "contact"]
+    tech_stack = Column(String(50), nullable=False, default="react-php") # "react-php" | "html-tailwind-php"
+
+    # Multi-tenant Subdomain Routing
+    subdomain = Column(String(100), unique=True, index=True, nullable=True) # e.g. "pepsi", "arcline"
+    custom_domain = Column(String(255), nullable=True)
+
     # Workflow & lifecycle status: draft, planning, generating_assets, generating_design, generating_backend, validating, awaiting_approval, ready, failed
     status = Column(String(50), nullable=False, default="draft")
     current_agent = Column(String(50), nullable=True)
@@ -25,6 +34,7 @@ class Project(Base):
     # Specs and generated output
     website_plan = Column(JSON, nullable=True)
     asset_manifest = Column(JSON, nullable=True)
+    requirements_spec = Column(JSON, nullable=True) # Full smart requirement analysis specification
     active_checkpoint_hash = Column(String(64), nullable=True)
 
     # Deployment
