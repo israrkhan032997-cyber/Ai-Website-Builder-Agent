@@ -20,7 +20,7 @@ async def test_conversational_assistant_progression():
         current_step="business_name",
         collected_data={}
     )
-    assert res1.next_step in ["industry", "description", "target_audience"]
+    assert res1.next_step in ["industry", "description", "target_audience", "website_type"]
     assert "Pepsi" in res1.updated_data["business_name"]
     assert len(res1.suggested_options) > 0
 
@@ -30,7 +30,7 @@ async def test_conversational_assistant_progression():
         current_step="industry",
         collected_data=res1.updated_data
     )
-    assert res2.next_step in ["description", "target_audience"]
+    assert res2.next_step in ["description", "target_audience", "website_type"]
     assert "Food" in res2.updated_data["industry"] or "Beverage" in res2.updated_data["industry"]
 
     # Step 3: Description

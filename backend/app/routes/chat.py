@@ -14,9 +14,10 @@ from backend.app.schemas.chat import (
     ChatMessageResponse,
     CreateProjectFromChatRequest,
 )
-from backend.app.schemas.project import ProjectResponse
+from backend.app.schemas.project import ProjectResponse, ProjectCreate
 from backend.app.services.conversational_assistant import conversational_assistant
 from backend.app.services.workspace_manager import workspace_manager
+from backend.app.services.subdomain_service import subdomain_service
 
 logger = logging.getLogger(__name__)
 
@@ -113,33 +114,65 @@ async def create_project_from_conversation(
     """
     state = payload.collected_data
     business_name = state.get("business_name") or "My Business"
-    industry = state.get("industry") or "General"
+    industry = state.get("industry") or "General Business"
     description = state.get("description") or f"A professional website for {business_name}"
     target_audience = state.get("target_audience")
     website_type = state.get("website_type") or "single-page"
-    selected_pages = state.get("selected_pages") or ["Home"]
+    selected_pages = state.get("selected_pages")
+    if website_type == "single-page":
+        selected_pages = ["home"]
+    elif not selected_pages:
+        selected_pages = ["home", "about", "services", "contact"]
+
     tech_stack = state.get("tech_stack") or "react-php"
     style = state.get("style") or "Modern & Clean"
     primary_color = state.get("primary_color") or "#2563eb"
     secondary_color = state.get("secondary_color") or "#0f172a"
     accent_color = state.get("accent_color") or "#38bdf8"
     subdomain = state.get("subdomain")
+    custom_domain = state.get("custom_domain")
+
+    # Validate using Pydantic ProjectCreate model
+    try:
+        project_in = ProjectCreate(
+            name=business_name.strip(),
+            industry=industry.strip(),
+            description=description.strip(),
+            target_audience=target_audience.strip() if target_audience else None,
+            style=style,
+            website_type=website_type,
+            selected_pages=selected_pages,
+            tech_stack=tech_stack,
+            subdomain=subdomain,
+            custom_domain=custom_domain,
+            primary_color=primary_color,
+            secondary_color=secondary_color,
+            accent_color=accent_color
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid project specification: {str(e)}")
+
+    if project_in.subdomain:
+        is_avail = await subdomain_service.is_slug_available(db, project_in.subdomain)
+        if not is_avail:
+            raise HTTPException(status_code=409, detail=f"Subdomain '{project_in.subdomain}' is already taken.")
 
     project_id = str(uuid.uuid4())
     project = Project(
         id=project_id,
-        name=business_name.strip(),
-        industry=industry.strip(),
-        description=description.strip(),
-        target_audience=target_audience.strip() if target_audience else None,
-        style=style,
-        website_type=website_type,
-        selected_pages=selected_pages,
-        tech_stack=tech_stack,
-        subdomain=subdomain,
-        primary_color=primary_color,
-        secondary_color=secondary_color,
-        accent_color=accent_color,
+        name=project_in.name,
+        industry=project_in.industry,
+        description=project_in.description,
+        target_audience=project_in.target_audience,
+        style=project_in.style,
+        website_type=project_in.website_type,
+        selected_pages=project_in.selected_pages,
+        tech_stack=project_in.tech_stack,
+        subdomain=project_in.subdomain,
+        custom_domain=project_in.custom_domain,
+        primary_color=project_in.primary_color,
+        secondary_color=project_in.secondary_color,
+        accent_color=project_in.accent_color,
         status="draft",
         progress_percentage="0%",
         requirements_spec=state

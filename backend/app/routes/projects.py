@@ -16,12 +16,18 @@ from backend.app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetailResponse
 )
 from backend.app.services.workspace_manager import workspace_manager
+from backend.app.services.subdomain_service import subdomain_service
 
 router = APIRouter(prefix="/api/v1/projects", tags=["Projects"])
 
 @router.post("", response_model=ProjectResponse, status_code=201)
 async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)):
     """Creates a new project record and prepares isolated workspace."""
+    if data.subdomain:
+        is_avail = await subdomain_service.is_slug_available(db, data.subdomain)
+        if not is_avail:
+            raise HTTPException(status_code=409, detail=f"Subdomain '{data.subdomain}' is already taken.")
+
     project_id = str(uuid.uuid4())
     project = Project(
         id=project_id,
@@ -31,7 +37,7 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
         target_audience=data.target_audience.strip() if data.target_audience else None,
         style=data.style or "Modern & Clean",
         website_type=data.website_type or "single-page",
-        selected_pages=data.selected_pages or ["Home"],
+        selected_pages=data.selected_pages or ["home"],
         tech_stack=data.tech_stack or "react-php",
         subdomain=data.subdomain,
         custom_domain=data.custom_domain,
@@ -93,6 +99,25 @@ async def update_project(project_id: str, data: ProjectUpdate, db: AsyncSession 
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
+
+    if data.subdomain:
+        is_avail = await subdomain_service.is_slug_available(db, data.subdomain, current_project_id=project_id)
+        if not is_avail:
+            raise HTTPException(status_code=409, detail=f"Subdomain '{data.subdomain}' is already taken.")
+
+    target_website_type = data.website_type or project.website_type
+    target_pages = data.selected_pages if data.selected_pages is not None else project.selected_pages
+    if target_website_type == "single-page" and target_pages and target_pages != ["home"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"For a 'single-page' website, selected_pages must only contain ['home']. Got {target_pages}."
+        )
+    elif target_website_type == "multi-page" and target_pages:
+        if len(target_pages) < 2 or "home" not in target_pages:
+            raise HTTPException(
+                status_code=422,
+                detail="For a 'multi-page' website, selected_pages must include 'home' and at least one secondary page."
+            )
 
     update_dict = data.model_dump(exclude_unset=True)
     for key, value in update_dict.items():

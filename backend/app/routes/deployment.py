@@ -7,6 +7,7 @@ from backend.app.models.agent_log import AgentLog
 from backend.app.schemas.approval import DeploymentApprovalRequest, DeploymentResponse
 from backend.app.agents.execution_agent import execution_agent
 from backend.app.services.deployment_service import deployment_service
+from backend.app.services.subdomain_service import subdomain_service
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}", tags=["Deployment"])
 
@@ -45,6 +46,16 @@ async def trigger_deployment(
 
     if not data.confirm:
         raise HTTPException(status_code=400, detail="Deployment confirmation was not granted.")
+
+    # Validate and verify domain ownership if custom domain is requested
+    target_custom_domain = data.custom_domain or project.custom_domain
+    if target_custom_domain:
+        is_verified, verify_msg = subdomain_service.verify_custom_domain_ownership(target_custom_domain)
+        if not is_verified:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Custom domain verification failed: {verify_msg}"
+            )
 
     # Record agent log
     log = AgentLog(

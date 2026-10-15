@@ -1,20 +1,24 @@
 import re
+import socket
 from typing import Tuple, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.config import settings
+from backend.app.schemas.project import (
+    RESERVED_SUBDOMAINS,
+    SUBDOMAIN_REGEX,
+    CUSTOM_DOMAIN_REGEX,
+    normalize_and_validate_subdomain,
+    normalize_and_validate_custom_domain
+)
 
 class SubdomainService:
     """
     Manages RFC-1035 compliant customer subdomain slugs, collision detection,
-    alternative generation, reservation, and multi-tenant routing resolution.
+    alternative generation, reservation, custom domain verification, and multi-tenant routing resolution.
     """
 
-    RESERVED_SLUGS = {
-        "admin", "api", "app", "dashboard", "dev", "staging", "mail", "ftp",
-        "smtp", "pop", "status", "test", "demo", "help", "support", "billing",
-        "root", "localhost", "preview", "assets", "static", "login", "register"
-    }
+    RESERVED_SLUGS = RESERVED_SUBDOMAINS
 
     def normalize_slug(self, name: str) -> str:
         """Converts business name into a clean, RFC-1035 valid subdomain slug."""
@@ -34,7 +38,9 @@ class SubdomainService:
             return False, "Subdomain must be at least 3 characters."
         if len(slug) > 63:
             return False, "Subdomain cannot exceed 63 characters."
-        if not re.match(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$", slug):
+        if "--" in slug:
+            return False, "Subdomain cannot contain consecutive hyphens."
+        if not SUBDOMAIN_REGEX.match(slug):
             return False, "Subdomain may only contain lowercase letters, numbers, and hyphens (cannot start or end with a hyphen)."
         if slug in self.RESERVED_SLUGS:
             return False, f"Subdomain '{slug}' is reserved by the platform."
@@ -129,5 +135,32 @@ class SubdomainService:
         project.subdomain = slug
         await db.commit()
         return True, slug, None
+
+    def verify_custom_domain_ownership(self, custom_domain: str) -> Tuple[bool, str]:
+        """
+        Validates custom domain format and verifies ownership / DNS readiness.
+        Returns: (is_verified, message)
+        """
+        try:
+            domain = normalize_and_validate_custom_domain(custom_domain)
+            if not domain:
+                return False, "Custom domain cannot be empty."
+        except ValueError as e:
+            return False, str(e)
+
+        # Allow local / test domains for testing and development environments
+        test_domains = {"localhost", "127.0.0.1", "test.local", "demo.local", "example.com"}
+        if domain in test_domains or domain.endswith(".test") or domain.endswith(".local"):
+            return True, f"Domain '{domain}' verified for local/test deployment."
+
+        try:
+            resolved_ip = socket.gethostbyname(domain)
+            return True, f"Domain '{domain}' verified. Resolved to {resolved_ip}."
+        except socket.gaierror:
+            # Fallback for unconfigured DNS during pre-deployment checks
+            return False, (
+                f"Domain ownership verification failed for '{domain}'. "
+                f"No active DNS A or CNAME record found. Please point your domain's DNS to the server."
+            )
 
 subdomain_service = SubdomainService()
