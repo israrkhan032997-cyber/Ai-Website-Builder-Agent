@@ -73,5 +73,16 @@ async def init_db() -> None:
                     logger.info("Applying SQLite migration: ALTER TABLE website_pages ADD COLUMN order_index INTEGER DEFAULT 0")
                     await conn.execute(text("ALTER TABLE website_pages ADD COLUMN order_index INTEGER DEFAULT 0"))
 
+                # Synchronize saved settings from DB table into memory
+                try:
+                    res_settings = await conn.execute(text("SELECT key, value FROM settings"))
+                    for row in res_settings.fetchall():
+                        if row[0] == "GEMINI_API_KEY" and row[1]:
+                            settings.GEMINI_API_KEY = row[1]
+                        elif row[0] == "GEMINI_MODEL" and row[1]:
+                            settings.GEMINI_MODEL = row[1]
+                except Exception:
+                    pass
+
             except Exception as e:
                 logger.warning(f"Database migration check warning: {e}")

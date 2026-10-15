@@ -32,39 +32,54 @@ async def process_chat_message(
     Evaluates natural language input, updates extracted state, and returns next question + suggestions.
     Optionally persists messages if project_id is provided.
     """
-    response = await conversational_assistant.process_chat_turn(
-        user_message=payload.user_message,
-        current_step=payload.current_step or "business_name",
-        collected_data=payload.collected_data or {}
-    )
+    try:
+        response = await conversational_assistant.process_chat_turn(
+            user_message=payload.user_message,
+            current_step=payload.current_step or "business_name",
+            collected_data=payload.collected_data or {}
+        )
+    except Exception as e:
+        logger.error(f"Error processing chat turn: {e}", exc_info=True)
+        # Resilient fallback: Never crash with 500 error
+        raw_msg = payload.user_message.strip()
+        data = dict(payload.collected_data or {})
+        if not data.get("business_name"):
+            data["business_name"] = raw_msg
+        response = ConversationalStepResponse(
+            assistant_message=f"I understand! Tell me more about what '{data.get('business_name', 'your business')}' offers, your primary services, and what makes you unique.",
+            next_step="description" if not data.get("description") else "target_audience",
+            suggested_options=["Full-Stack Web & Mobile Apps", "Modern SaaS & Cloud Platforms", "Turnkey Digital Engineering"],
+            updated_data=data
+        )
 
     # Persist message history if project_id is bound
     if payload.project_id:
-        project = await db.get(Project, payload.project_id)
-        if project:
-            # Save user message
-            user_msg = ChatMessage(
-                project_id=payload.project_id,
-                sender="user",
-                step=payload.current_step,
-                content=payload.user_message
-            )
-            db.add(user_msg)
+        try:
+            project = await db.get(Project, payload.project_id)
+            if project:
+                user_msg = ChatMessage(
+                    project_id=payload.project_id,
+                    sender="user",
+                    step=payload.current_step,
+                    content=payload.user_message
+                )
+                db.add(user_msg)
 
-            # Save assistant response
-            bot_msg = ChatMessage(
-                project_id=payload.project_id,
-                sender="assistant",
-                step=response.next_step,
-                content=response.assistant_message,
-                message_metadata={
-                    "suggested_options": response.suggested_options,
-                    "updated_data": response.updated_data,
-                    "is_complete": response.is_complete
-                }
-            )
-            db.add(bot_msg)
-            await db.commit()
+                bot_msg = ChatMessage(
+                    project_id=payload.project_id,
+                    sender="assistant",
+                    step=response.next_step,
+                    content=response.assistant_message,
+                    message_metadata={
+                        "suggested_options": response.suggested_options,
+                        "updated_data": response.updated_data,
+                        "is_complete": response.is_complete
+                    }
+                )
+                db.add(bot_msg)
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist chat message in DB: {e}")
 
     return response
 

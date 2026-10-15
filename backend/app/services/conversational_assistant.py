@@ -145,19 +145,23 @@ Instructions:
 
             ai_res = await self._ask_ai_turn_guidance(current_step, msg, data)
             if ai_res:
-                if ai_res.inferred_business_name and not data.get("business_name"):
+                if ai_res.inferred_business_name:
                     data["business_name"] = ai_res.inferred_business_name
                 if ai_res.inferred_industry:
                     data["industry"] = ai_res.inferred_industry
-                if ai_res.inferred_description and not data.get("description"):
+                if ai_res.inferred_description:
                     data["description"] = ai_res.inferred_description
+                if ai_res.inferred_target_audience:
+                    data["target_audience"] = ai_res.inferred_target_audience
 
                 if not data.get("industry"):
                     next_s = "industry"
                 elif not data.get("description"):
                     next_s = "description"
-                else:
+                elif not data.get("target_audience"):
                     next_s = "target_audience"
+                else:
+                    next_s = "website_type"
 
                 return ConversationalStepResponse(
                     assistant_message=ai_res.assistant_message,
