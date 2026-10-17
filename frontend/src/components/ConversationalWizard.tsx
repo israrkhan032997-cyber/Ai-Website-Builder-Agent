@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Send, Bot, User, ArrowRight, CheckCircle2,
-  Layers, Code2, Palette, Globe, RefreshCw, X, ArrowLeft
+  RefreshCw, X, ArrowLeft
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Project } from '../types';
@@ -54,6 +54,36 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
     inputRef.current?.focus();
   }, [currentStep, isLoading]);
 
+  const [customPageInput, setCustomPageInput] = useState('');
+
+  const handleTogglePage = (pageName: string) => {
+    if (pageName.toLowerCase() === 'home') return;
+    const current: string[] = (collectedData.selected_pages || ['Home', 'About Us', 'Services', 'Portfolio', 'Contact Us']).map(String);
+    const exists = current.some(p => p.toLowerCase() === pageName.toLowerCase());
+    let next: string[];
+    if (exists) {
+      next = current.filter(p => p.toLowerCase() !== pageName.toLowerCase());
+    } else {
+      next = [...current, pageName];
+    }
+    setCollectedData(prev => ({ ...prev, selected_pages: next }));
+  };
+
+  const handleAddCustomPage = () => {
+    const trimmed = customPageInput.trim();
+    if (!trimmed) return;
+    const current: string[] = (collectedData.selected_pages || ['Home', 'About Us', 'Services', 'Portfolio', 'Contact Us']).map(String);
+    if (!current.some(p => p.toLowerCase() === trimmed.toLowerCase())) {
+      setCollectedData(prev => ({ ...prev, selected_pages: [...current, trimmed] }));
+    }
+    setCustomPageInput('');
+  };
+
+  const handleConfirmPages = () => {
+    const pages = (collectedData.selected_pages || ['Home', 'About Us', 'Services', 'Portfolio', 'Contact Us']).map(String);
+    handleSendMessage(`Selected pages: ${pages.join(', ')}`);
+  };
+
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputValue).trim();
     if (!text || isLoading) return;
@@ -77,9 +107,13 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
         collected_data: collectedData,
       });
 
-      // Update state
+      // Update state while strictly preserving business_name if already entered
       setCurrentStep(response.next_step);
-      setCollectedData(response.updated_data || collectedData);
+      const updated = { ...(response.updated_data || collectedData) };
+      if (collectedData.business_name && !updated.business_name) {
+        updated.business_name = collectedData.business_name;
+      }
+      setCollectedData(updated);
 
       // Add assistant response
       const botMsgId = `assistant-${Date.now()}`;
@@ -104,8 +138,36 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
+      const payloadData = { ...collectedData };
+      payloadData.tech_stack = 'react';
+      if (payloadData.selected_pages && Array.isArray(payloadData.selected_pages)) {
+        const cleanPages: string[] = [];
+        const seen = new Set<string>();
+        for (const p of payloadData.selected_pages) {
+          const raw = String(p).trim();
+          let clean = raw.toLowerCase().replace(/^(?:(?:please\s+)?(?:use|confirm|selected|choose)?[- ]*(?:selected[- ]*)?pages?(?:[- ]*structure)?)\s*[:=-]+\s*/i, '');
+          clean = clean.replace(/^(?:use|selected|confirm)[-_]selected[-_]pages?[:\-_ ]*/i, '');
+          clean = clean.replace(/^(add|create|new|include)[- ]+/i, '').replace(/[- ]page$/i, '');
+          clean = clean.replace(/[^a-z0-9\- ,;&]+/g, ' ');
+          const parts = clean.split(/[,;&]|\band\b/i).map(s => s.trim()).filter(Boolean);
+          for (const part of parts) {
+            const words = part.split(/[\s\-]+/).filter(w => !['use', 'selected', 'pages', 'page', 'structure', 'confirm', 'choose'].includes(w));
+            if (!words.length) continue;
+            const slug = words.join('-');
+            if (slug && !seen.has(slug)) {
+              seen.add(slug);
+              cleanPages.push(slug);
+            }
+          }
+        }
+        if (!cleanPages.includes('home')) {
+          cleanPages.unshift('home');
+        }
+        payloadData.selected_pages = cleanPages;
+      }
+
       // 1. Create project record from conversational specification
-      const newProject = await api.createProjectFromChat(collectedData);
+      const newProject = await api.createProjectFromChat(payloadData);
 
       // 2. Trigger multi-agent pipeline immediately in background
       api.generateWebsite(newProject.id).catch((e) => {
@@ -185,12 +247,12 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
         </button>
       </header>
 
-      {/* Main Split Layout */}
+      {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Chat Stream */}
-        <div className="flex-1 flex flex-col bg-slate-900 border-r border-slate-800/80">
+        {/* Chat Stream */}
+        <div className="flex-1 flex flex-col bg-slate-900">
           {/* Scrollable Messages */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6 max-w-4xl w-full mx-auto">
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -220,6 +282,81 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
                   >
                     {msg.text}
                   </div>
+
+                  {/* Interactive Page Manager for page_selection step */}
+                  {currentStep === 'page_selection' && msg.id === messages[messages.length - 1]?.id && (
+                    <div className="p-4 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-4 animate-fadeIn">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          Select Pages to Include:
+                        </span>
+                        <span className="text-[11px] font-mono text-blue-400 font-semibold">
+                          {(collectedData.selected_pages || ['Home', 'About Us', 'Services', 'Portfolio', 'Contact Us']).length} Selected
+                        </span>
+                      </div>
+
+                      {/* Standard Page Pills */}
+                      <div className="flex flex-wrap gap-2">
+                        {['Home', 'About Us', 'Services', 'Portfolio', 'Case Study', 'Pricing', 'Testimonials', 'Blog', 'FAQ', 'Contact Us'].map((pg) => {
+                          const currentPages: string[] = (collectedData.selected_pages || ['Home', 'About Us', 'Services', 'Portfolio', 'Contact Us']).map(String);
+                          const isSelected = currentPages.some(p => p.toLowerCase() === pg.toLowerCase());
+                          const isHome = pg.toLowerCase() === 'home';
+                          return (
+                            <button
+                              key={pg}
+                              type="button"
+                              onClick={() => handleTogglePage(pg)}
+                              disabled={isHome || isLoading}
+                              className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition flex items-center gap-1.5 ${
+                                isSelected
+                                  ? 'bg-blue-600/30 border-blue-500 text-blue-200 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                              } ${isHome ? 'opacity-80 cursor-default' : 'cursor-pointer active:scale-95'}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-blue-400' : 'bg-slate-600'}`} />
+                              {pg}
+                              {isHome && <span className="text-[10px] text-blue-300 font-mono">(required)</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Add Custom Page Input */}
+                      <div className="flex gap-2 pt-1 border-t border-slate-700/60">
+                        <input
+                          type="text"
+                          value={customPageInput}
+                          onChange={(e) => setCustomPageInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddCustomPage();
+                            }
+                          }}
+                          placeholder="e.g. Our Team, Careers, Partners..."
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomPage}
+                          disabled={!customPageInput.trim()}
+                          className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white rounded-lg text-xs font-semibold transition"
+                        >
+                          + Add Page
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleConfirmPages}
+                        disabled={isLoading}
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/20"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Confirm Selected Pages & Proceed
+                      </button>
+                    </div>
+                  )}
 
                   {/* Suggestion Chips */}
                   {msg.options && msg.options.length > 0 && msg.id === messages[messages.length - 1]?.id && !isReviewStep && (
@@ -282,7 +419,7 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  <span className="ml-2 text-xs text-slate-400 font-medium">Formulating question...</span>
+                  <span className="ml-2 text-xs text-slate-400 font-medium">Gemini AI is thinking...</span>
                 </div>
               </div>
             )}
@@ -329,118 +466,6 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
                 <Send className="w-4 h-4" />
               </button>
             </form>
-          </div>
-        </div>
-
-        {/* Right: Live Architecture Specification Sidebar */}
-        <div className="hidden lg:flex w-96 flex-col bg-slate-950 border-l border-slate-800 overflow-y-auto p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Layers className="w-3.5 h-3.5 text-blue-400" />
-              Live Requirements Spec
-            </h2>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-              RFC-1035
-            </span>
-          </div>
-
-          {/* Business Summary Card */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Business Name</span>
-              <p className="text-sm font-bold text-white mt-0.5">
-                {collectedData.business_name || <span className="text-slate-600 italic">Awaiting answer...</span>}
-              </p>
-            </div>
-
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Industry Sector</span>
-              <p className="text-xs font-medium text-slate-300 mt-0.5">
-                {collectedData.industry || <span className="text-slate-600 italic">Not specified yet</span>}
-              </p>
-            </div>
-
-            {collectedData.description && (
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Description</span>
-                <p className="text-xs text-slate-400 line-clamp-3 mt-0.5 leading-relaxed">
-                  {collectedData.description}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Architecture Card */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Architecture</span>
-              <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                {collectedData.website_type === 'multi-page' ? 'Multi-Page Website' : 'Single-Page Landing'}
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Pages Structure</span>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {(collectedData.selected_pages || ['Home']).map((p: string, idx: number) => (
-                  <span
-                    key={idx}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 font-medium"
-                  >
-                    {p}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-              <span className="text-slate-400 flex items-center gap-1.5">
-                <Code2 className="w-3.5 h-3.5 text-indigo-400" />
-                Backend Integration
-              </span>
-              <span className="font-mono text-slate-200 font-semibold">
-                React + PHP Backend
-              </span>
-            </div>
-          </div>
-
-          {/* Design & Palette Card */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Design Style</span>
-              <span className="text-xs text-slate-300 font-semibold">{collectedData.style || 'Modern & Clean'}</span>
-            </div>
-
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Color Palette</span>
-              <div className="flex items-center gap-3 mt-2">
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className="w-5 h-5 rounded-md shadow-sm border border-white/10"
-                    style={{ backgroundColor: collectedData.primary_color || '#2563eb' }}
-                  />
-                  <span className="text-[10px] font-mono text-slate-400">Primary</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className="w-5 h-5 rounded-md shadow-sm border border-white/10"
-                    style={{ backgroundColor: collectedData.secondary_color || '#0f172a' }}
-                  />
-                  <span className="text-[10px] font-mono text-slate-400">Secondary</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Subdomain Card */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              Assigned Subdomain Slug
-            </span>
-            <p className="text-xs font-mono text-emerald-400">
-              {collectedData.subdomain ? `${collectedData.subdomain}.local` : (collectedData.business_name ? `${collectedData.business_name.toLowerCase().replace(/[^a-z0-9]/g, '-')}.local` : 'site-draft.local')}
-            </p>
           </div>
         </div>
       </div>

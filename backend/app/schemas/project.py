@@ -8,8 +8,8 @@ from backend.app.schemas.agent import WebsitePlan, AssetManifest
 # Supported Architectural Constants and Types
 # ---------------------------------------------------------------------------
 
-SUPPORTED_TECH_STACKS: tuple[str, ...] = ("react-php", "html-tailwind-php")
-TechStackType = Literal["react-php", "html-tailwind-php"]
+SUPPORTED_TECH_STACKS: tuple[str, ...] = ("react",)
+TechStackType = Literal["react"]
 
 SUPPORTED_WEBSITE_TYPES: tuple[str, ...] = ("single-page", "multi-page")
 WebsiteType = Literal["single-page", "multi-page"]
@@ -18,6 +18,7 @@ SUPPORTED_PAGE_SLUGS: Set[str] = {
     "home",
     "about",
     "about-us",
+    "features",
     "services",
     "products",
     "portfolio",
@@ -31,12 +32,23 @@ SUPPORTED_PAGE_SLUGS: Set[str] = {
     "contact-us",
     "careers",
     "team",
+    "case-study",
+    "case-studies",
+    "our-team",
 }
 
 PAGE_SLUG_ALIASES: Dict[str, str] = {
     "about-us": "about",
     "contact-us": "contact",
     "projects": "portfolio",
+    "case-studies": "case-study",
+    "reviews": "testimonials",
+    "client-reviews": "testimonials",
+    "plans": "pricing",
+    "articles": "blog",
+    "news": "blog",
+    "faqs": "faq",
+    "contact-page": "contact",
 }
 
 RESERVED_SUBDOMAINS: Set[str] = {
@@ -121,8 +133,91 @@ def normalize_and_validate_custom_domain(v: Any) -> Optional[str]:
     return domain
 
 
+RESERVED_PAGE_SLUGS: Set[str] = {
+    "admin", "api", "app", "dashboard", "auth", "static", "assets",
+    "login", "register", "preview", "internal", "null", "undefined",
+    "webhook", "health"
+}
+
+
+def decompose_page_entry(entry: str) -> List[str]:
+    """
+    Decomposes and normalizes a page label, action phrase, instruction text, or slug
+    into one or more valid canonical slugs.
+    Handles instruction phrases:
+      'Use selected pages: Home, Pricing, Contact' -> ['home', 'pricing', 'contact']
+      'use-selected-pages:-home' -> ['home']
+      'Pages structure: home, about' -> ['home', 'about']
+    Handles compound action phrases:
+      'Add Portfolio About' -> ['portfolio', 'about']
+      'Add FAQ page' -> ['faq']
+      'Add Portfolio & Case Studies' -> ['portfolio', 'case-study']
+    """
+    raw = entry.strip()
+    if not raw:
+        return []
+    clean_lower = raw.lower()
+
+    # 1. Strip prompt / instruction prefixes (both space-separated and hyphen-separated, with colons/equals/dashes)
+    clean_lower = re.sub(
+        r"^(?:(?:please\s+)?(?:use|confirm|selected|choose)?[- ]*(?:selected[- ]*)?pages?(?:[- ]*structure)?)\s*[:=-]+\s*",
+        "",
+        clean_lower
+    )
+    clean_lower = re.sub(r"^use[-_]selected[-_]pages?[:\-_ ]*", "", clean_lower)
+    clean_lower = re.sub(r"^selected[-_]pages?[:\-_ ]*", "", clean_lower)
+    clean_lower = re.sub(r"^pages?[:\-_ ]*", "", clean_lower)
+
+    # 2. Strip action prefixes like "add ", "create ", "new ", "include "
+    clean_lower = re.sub(r"^(add|create|new|include)[- ]+", "", clean_lower)
+    # Strip trailing " page" or "-page"
+    clean_lower = re.sub(r"[- ]page$", "", clean_lower)
+
+    # 3. Split by commas, semicolons, ampersands, or the word 'and'
+    parts = [p.strip() for p in re.split(r"[,;&]|\band\b", clean_lower) if p.strip()]
+    if not parts:
+        parts = [clean_lower] if clean_lower.strip() else []
+
+    instruction_words = {"use", "selected", "pages", "page", "structure", "choose", "confirm", "confirmed"}
+    known_kw = {
+        "home", "about", "services", "portfolio", "case", "study",
+        "contact", "pricing", "team", "blog", "faq", "gallery",
+        "careers", "products", "testimonials", "features"
+    }
+
+    result_slugs = []
+    for part in parts:
+        raw_words = part.replace("-", " ").split()
+        if not raw_words:
+            continue
+
+        meaningful_words = [w for w in raw_words if w not in instruction_words]
+        if not meaningful_words:
+            continue
+
+        words = meaningful_words
+
+        if "case" in words and "study" in words:
+            words = [w for w in words if w not in ("case", "study")]
+            result_slugs.append("case-study")
+
+        recognized_in_words = [w for w in words if w in known_kw]
+        if len(recognized_in_words) > 1 and len(words) == len(recognized_in_words):
+            for rw in recognized_in_words:
+                result_slugs.append(PAGE_SLUG_ALIASES.get(rw, rw))
+        elif words:
+            slug = "-".join(words)
+            slug = PAGE_SLUG_ALIASES.get(slug, slug)
+            result_slugs.append(slug)
+    return result_slugs
+
+
 def normalize_and_validate_page_slugs(v: Any) -> Optional[List[str]]:
-    """Validates and normalizes a list of page slugs against supported slugs."""
+    """
+    Validates and normalizes page slugs.
+    Supports standard built-in pages, aliases, and valid custom slugs (e.g. case-study, our-team).
+    Enforces format, length, uniqueness, and reserved path constraints.
+    """
     if v is None:
         return None
     if not isinstance(v, list):
@@ -130,25 +225,39 @@ def normalize_and_validate_page_slugs(v: Any) -> Optional[List[str]]:
 
     normalized_pages: List[str] = []
     seen: Set[str] = set()
+
     for idx, page in enumerate(v):
         if not isinstance(page, str):
             raise ValueError(f"Page slug at index {idx} must be a string.")
-        slug = page.strip().lower().replace(" ", "-")
-        if not slug:
+        if not page.strip():
             raise ValueError(f"Page slug at index {idx} cannot be empty.")
-        if slug in PAGE_SLUG_ALIASES:
-            slug = PAGE_SLUG_ALIASES[slug]
-        if not PAGE_SLUG_REGEX.match(slug):
-            raise ValueError(
-                f"Invalid page slug format '{page}'. Page slugs must only contain lowercase alphanumeric characters and hyphens."
-            )
-        if slug not in SUPPORTED_PAGE_SLUGS and slug not in PAGE_SLUG_ALIASES.values():
-            raise ValueError(
-                f"Unsupported page slug '{slug}'. Supported page slugs are: {', '.join(sorted(SUPPORTED_PAGE_SLUGS))}."
-            )
-        if slug not in seen:
-            seen.add(slug)
-            normalized_pages.append(slug)
+
+        extracted_slugs = decompose_page_entry(page)
+        if not extracted_slugs:
+            # Safely skip pure instruction noise rather than failing
+            continue
+
+        for slug in extracted_slugs:
+            slug = PAGE_SLUG_ALIASES.get(slug, slug)
+            if not PAGE_SLUG_REGEX.match(slug):
+                raise ValueError(
+                    f"Invalid page slug format '{page}'. Page slugs must only contain lowercase alphanumeric characters and hyphens."
+                )
+            if len(slug) < 2 or len(slug) > 50:
+                raise ValueError(
+                    f"Invalid page slug '{slug}'. Page slugs must be between 2 and 50 characters long."
+                )
+            if slug in RESERVED_PAGE_SLUGS:
+                raise ValueError(
+                    f"Page slug '{slug}' is a reserved platform route and cannot be used as a custom page."
+                )
+            if slug not in seen:
+                seen.add(slug)
+                normalized_pages.append(slug)
+
+    if not normalized_pages:
+        raise ValueError("selected_pages cannot be empty or contain only invalid instruction strings.")
+
     return normalized_pages
 
 
@@ -168,7 +277,7 @@ class ProjectCreate(BaseModel):
     logo_url: Optional[str] = None
     website_type: WebsiteType = Field("single-page", description="Website architecture: 'single-page' or 'multi-page'")
     selected_pages: Optional[List[str]] = Field(None, description="List of page slugs e.g. ['home', 'about', 'services', 'contact']")
-    tech_stack: TechStackType = Field("react-php", description="Supported technology stack: 'react-php' (React frontend + PHP backend) or 'html-tailwind-php'")
+    tech_stack: TechStackType = Field("react", description="Supported technology stack: 'react' (Pure React SPA)")
     subdomain: Optional[str] = Field(None, description="Desired customer subdomain slug e.g. 'pepsi'")
     custom_domain: Optional[str] = Field(None, description="Custom domain e.g. 'pepsi.com'")
 
@@ -176,14 +285,13 @@ class ProjectCreate(BaseModel):
     @classmethod
     def validate_tech_stack(cls, v: Any) -> str:
         if v is None:
-            return "react-php"
+            return "react"
         if not isinstance(v, str):
             raise ValueError("tech_stack must be a string.")
         v_clean = v.strip().lower()
         if v_clean not in SUPPORTED_TECH_STACKS:
             raise ValueError(
-                f"Unsupported tech_stack '{v}'. Supported stacks are: {', '.join(SUPPORTED_TECH_STACKS)}. "
-                f"The required architecture is 'react-php' (React frontend + PHP backend)."
+                f"Unsupported tech_stack '{v}'. The required architecture is 'react' (Pure React SPA)."
             )
         return v_clean
 
@@ -269,8 +377,7 @@ class ProjectUpdate(BaseModel):
         v_clean = v.strip().lower()
         if v_clean not in SUPPORTED_TECH_STACKS:
             raise ValueError(
-                f"Unsupported tech_stack '{v}'. Supported stacks are: {', '.join(SUPPORTED_TECH_STACKS)}. "
-                f"The required architecture is 'react-php' (React frontend + PHP backend)."
+                f"Unsupported tech_stack '{v}'. The required architecture is 'react' (Pure React SPA)."
             )
         return v_clean
 
@@ -371,6 +478,7 @@ class NaturalLanguageEditRequest(BaseModel):
     instruction: str = Field(..., min_length=3, description="Natural language instructions describing requested changes")
     section_id: Optional[str] = Field(None, description="Optional target section ID (e.g., 'hero', 'features', 'contact')")
     page_slug: Optional[str] = Field(None, description="Optional target page slug (e.g., 'home', 'about', 'services')")
+    asset_url: Optional[str] = Field(None, description="Optional exact asset or logo URL extracted from user message")
 
     @field_validator("section_id", mode="before")
     @classmethod

@@ -1,7 +1,7 @@
 import uuid
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/v1/chat", tags=["Conversational Chatbot"])
 @router.post("/message", response_model=ConversationalStepResponse)
 async def process_chat_message(
     payload: ConversationalStepRequest,
+    x_gemini_api_key: Optional[str] = Header(None, alias="X-Gemini-Api-Key"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -33,24 +34,42 @@ async def process_chat_message(
     Evaluates natural language input, updates extracted state, and returns next question + suggestions.
     Optionally persists messages if project_id is provided.
     """
+    if not payload.user_message or not payload.user_message.strip():
+        raise HTTPException(status_code=400, detail="User message cannot be empty.")
+
     try:
         response = await conversational_assistant.process_chat_turn(
             user_message=payload.user_message,
             current_step=payload.current_step or "business_name",
-            collected_data=payload.collected_data or {}
+            collected_data=payload.collected_data or {},
+            api_key=x_gemini_api_key
         )
     except Exception as e:
-        logger.error(f"Error processing chat turn: {e}", exc_info=True)
-        # Resilient fallback: Never crash with 500 error
-        raw_msg = payload.user_message.strip()
-        data = dict(payload.collected_data or {})
-        if not data.get("business_name"):
-            data["business_name"] = raw_msg
-        response = ConversationalStepResponse(
-            assistant_message=f"I understand! Tell me more about what '{data.get('business_name', 'your business')}' offers, your primary services, and what makes you unique.",
-            next_step="description" if not data.get("description") else "target_audience",
-            suggested_options=["Full-Stack Web & Mobile Apps", "Modern SaaS & Cloud Platforms", "Turnkey Digital Engineering"],
-            updated_data=data
+        logger.error(f"Error processing chat turn with Gemini: {e}", exc_info=True)
+        err_str = str(e)
+        if "API key is not configured" in err_str or "No active Gemini API key" in err_str:
+            raise HTTPException(
+                status_code=400,
+                detail="Gemini API key is not configured. Please set GEMINI_API_KEY in your local .env file."
+            )
+        if "API_KEY_INVALID" in err_str or "401" in err_str or "Invalid Gemini API key" in err_str:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Gemini API key. Please check your GEMINI_API_KEY configuration."
+            )
+        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini API rate limit or quota exceeded (429). Please try again shortly or check your Google AI Studio quota."
+            )
+        if "timeout" in err_str.lower() or "deadline" in err_str.lower():
+            raise HTTPException(
+                status_code=504,
+                detail="Gemini API request timed out. Please try sending your message again."
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini AI error: {err_str}"
         )
 
     # Persist message history if project_id is bound
@@ -121,10 +140,13 @@ async def create_project_from_conversation(
     selected_pages = state.get("selected_pages")
     if website_type == "single-page":
         selected_pages = ["home"]
-    elif not selected_pages:
+    elif selected_pages:
+        from backend.app.services.conversational_assistant import sanitize_page_list
+        selected_pages = sanitize_page_list(selected_pages)
+    else:
         selected_pages = ["home", "about", "services", "contact"]
 
-    tech_stack = state.get("tech_stack") or "react-php"
+    tech_stack = state.get("tech_stack") or "react"
     style = state.get("style") or "Modern & Clean"
     primary_color = state.get("primary_color") or "#2563eb"
     secondary_color = state.get("secondary_color") or "#0f172a"

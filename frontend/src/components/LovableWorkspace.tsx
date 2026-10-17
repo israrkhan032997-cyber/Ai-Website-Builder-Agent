@@ -138,13 +138,17 @@ export const LovableWorkspace: React.FC<LovableWorkspaceProps> = ({
     setChatMessages((prev) => [...prev, { sender: 'user', text: instruction }]);
     setIsApplyingEdit(true);
 
+    // Extract exact asset URL from user input if present
+    const urlMatch = instruction.match(/https?:\/\/[^\s<>"')\]}]+/);
+    const extractedUrl = urlMatch ? urlMatch[0].replace(/[,.'")\]}]+$/, '') : undefined;
+
     try {
-      const res = await api.editWebsite(project.id, instruction);
+      const res = await api.editWebsite(project.id, instruction, undefined, extractedUrl);
       setChatMessages((prev) => [
         ...prev,
         {
           sender: 'assistant',
-          text: `Applied change: "${instruction}". Saved Git checkpoint.`,
+          text: res.message || `Applied change: "${instruction}".`,
           hash: res.commit_hash,
         },
       ]);
@@ -213,7 +217,7 @@ export const LovableWorkspace: React.FC<LovableWorkspaceProps> = ({
               {project.website_type === 'multi-page' ? 'Multi-Page' : 'Single-Page'}
             </span>
             <span className="hidden sm:inline-block text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
-              React + PHP
+              React SPA
             </span>
           </div>
         </div>
@@ -379,12 +383,6 @@ export const LovableWorkspace: React.FC<LovableWorkspaceProps> = ({
                       >
                         {msg.text}
                       </div>
-
-                      {msg.hash && (
-                        <span className="inline-block text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-emerald-400 border border-slate-700">
-                          Git Checkpoint: {msg.hash.slice(0, 7)}
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}

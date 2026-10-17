@@ -50,20 +50,20 @@ class RequirementsReview(BaseModel):
     selected_pages: List[str] = Field(default_factory=list)
     design_style: str = "Modern & Clean"
     brand_colors: Dict[str, str] = Field(default_factory=dict)
-    tech_stack: TechStackType = Field("react-php", description="Supported architecture: 'react-php'")
+    tech_stack: TechStackType = Field("react", description="Supported architecture: 'react'")
     additional_notes: Optional[str] = None
 
     @field_validator("tech_stack", mode="before")
     @classmethod
     def validate_tech_stack(cls, v: Any) -> str:
         if v is None:
-            return "react-php"
+            return "react"
         if not isinstance(v, str):
             raise ValueError("tech_stack must be a string.")
         v_clean = v.strip().lower()
         if v_clean not in SUPPORTED_TECH_STACKS:
             raise ValueError(
-                f"Unsupported tech_stack '{v}'. Supported stacks are: {', '.join(SUPPORTED_TECH_STACKS)}."
+                f"Unsupported tech_stack '{v}'. The required architecture is 'react' (Pure React SPA)."
             )
         return v_clean
 

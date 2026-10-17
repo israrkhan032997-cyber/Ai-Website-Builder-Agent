@@ -76,11 +76,11 @@ export const api = {
     return handleResponse(res);
   },
 
-  async editWebsite(id: string, instruction: string, section_id?: string): Promise<{ status: string; message: string; commit_hash?: string }> {
+  async editWebsite(id: string, instruction: string, section_id?: string, asset_url?: string): Promise<{ status: string; message: string; commit_hash?: string; target_page?: string }> {
     const res = await fetch(`${API_BASE}/projects/${id}/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instruction, section_id }),
+      body: JSON.stringify({ instruction, section_id, asset_url }),
     });
     return handleResponse(res);
   },

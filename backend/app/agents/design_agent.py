@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import Dict, List, Optional
@@ -65,6 +66,10 @@ class DesignAgent:
         # CSS and JS
         files.append(CodeFile(path="styles.css", content=self._render_css(plan), description="Theme tokens and micro-interactions"))
         files.append(CodeFile(path="main.js", content=self._render_js(project_id), description="Client scripts and form submission handler"))
+
+        # Pure React source files (package.json, vite.config.js, src/App.jsx, src/components/*)
+        react_files = self._generate_react_source_files(project_id, plan, website_type, pages_to_build)
+        files.extend(react_files)
 
         return files
 
@@ -902,4 +907,1060 @@ document.addEventListener('DOMContentLoaded', () => {{
 }});
 """
 
+    def _generate_react_source_files(
+        self,
+        project_id: str,
+        plan: WebsitePlan,
+        website_type: str,
+        pages: List[str]
+    ) -> List[CodeFile]:
+        is_multi = website_type == "multi-page" or len(pages) > 1
+        p_col = plan.color_scheme.primary or "#2563eb"
+        s_col = plan.color_scheme.secondary or "#0f172a"
+        acc_col = plan.color_scheme.accent or "#38bdf8"
+        b_name = plan.business_name
+        b_slug = self._slugify(b_name)
+        ind = plan.industry or "Professional Services"
+        tagline = plan.tagline or f"Premium {ind} Solutions"
+        summary = plan.summary or f"Empowering clients with superior {ind} services."
+        email = plan.contact_email or f"info@{b_slug}.com"
+        phone = plan.contact_phone or "+1 (555) 019-2834"
+
+        files: List[CodeFile] = []
+
+        # 1. package.json
+        pkg_json = """{
+  "name": "__SLUG__-react-site",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.344.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  }
+}""".replace("__SLUG__", b_slug)
+        files.append(CodeFile(path="package.json", content=pkg_json, description="React project dependencies and scripts"))
+
+        # 2. vite.config.js
+        vite_config = """import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+"""
+        files.append(CodeFile(path="vite.config.js", content=vite_config, description="Vite build configuration"))
+
+        # 3. tailwind.config.js
+        tailwind_config = """/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: '__PRIMARY__',
+        secondary: '__SECONDARY__',
+        accent: '__ACCENT__',
+      }
+    },
+  },
+  plugins: [],
+}""".replace("__PRIMARY__", p_col).replace("__SECONDARY__", s_col).replace("__ACCENT__", acc_col)
+        files.append(CodeFile(path="tailwind.config.js", content=tailwind_config, description="Tailwind CSS theme configuration"))
+
+        # 4. src/index.css
+        index_css = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: __PRIMARY__;
+  --secondary-color: __SECONDARY__;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-family: '__FONT__', system-ui, -apple-system, sans-serif;
+}
+""".replace("__PRIMARY__", p_col).replace("__SECONDARY__", s_col).replace("__FONT__", plan.typography.body_font or "Inter")
+        files.append(CodeFile(path="src/index.css", content=index_css, description="Global Tailwind and typography styles"))
+
+        # 5. src/main.jsx
+        main_jsx = """import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+"""
+        files.append(CodeFile(path="src/main.jsx", content=main_jsx, description="React root application entry point"))
+
+        # 6. src/components/Navbar.jsx
+        title_map = {
+            "home": "Home",
+            "about": "About",
+            "about-us": "About",
+            "services": "Services",
+            "portfolio": "Portfolio",
+            "projects": "Portfolio",
+            "case-study": "Case Studies",
+            "case-studies": "Case Studies",
+            "contact": "Contact",
+            "contact-us": "Contact",
+            "pricing": "Pricing",
+            "testimonials": "Testimonials",
+            "team": "Team",
+            "our-team": "Our Team",
+            "blog": "Blog",
+            "faq": "FAQ",
+            "gallery": "Gallery",
+            "products": "Products",
+            "careers": "Careers",
+        }
+        multi_nav = []
+        single_nav = []
+        for p in (pages if pages else ["home"]):
+            name = title_map.get(p.lower(), p.replace("-", " ").title())
+            multi_nav.append({"name": name, "id": p.lower()})
+            single_nav.append({"name": name, "href": f"#{p.lower()}"})
+
+        multi_nav_json = json.dumps(multi_nav)
+        single_nav_json = json.dumps(single_nav)
+
+        navbar_jsx = """import React, { useState } from 'react';
+import { Menu, X, Sparkles } from 'lucide-react';
+
+export default function Navbar({ activePage, setActivePage, isMultiPage = false }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navLinks = isMultiPage ? __MULTI_NAV__ : __SINGLE_NAV__;
+
+  return (
+    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-slate-100 shadow-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between h-20 items-center">
+          <div 
+            className="flex items-center gap-3 cursor-pointer" 
+            onClick={() => isMultiPage && setActivePage && setActivePage('home')}
+          >
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <span className="font-extrabold text-xl tracking-tight text-slate-900">
+              __NAME__
+            </span>
+          </div>
+
+          <nav className="hidden md:flex items-center gap-8">
+            {navLinks.map((item) => (
+              isMultiPage ? (
+                <button
+                  key={item.id}
+                  onClick={() => setActivePage(item.id)}
+                  className={`text-sm font-semibold transition-colors pb-1 ${
+                    activePage === item.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {item.name}
+                </button>
+              ) : (
+                <a
+                  key={item.name}
+                  href={item.href}
+                  className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors"
+                >
+                  {item.name}
+                </a>
+              )
+            ))}
+
+            <button
+              onClick={() => isMultiPage ? (setActivePage && setActivePage('contact')) : document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' })}
+              className="px-5 py-2.5 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-all"
+            >
+              Get in Touch
+            </button>
+          </nav>
+
+          <div className="md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 text-slate-600 hover:text-slate-900 focus:outline-none"
+              aria-label="Toggle Navigation"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {mobileMenuOpen && (
+        <div className="md:hidden px-4 pt-2 pb-6 border-t border-slate-100 bg-white space-y-2">
+          {navLinks.map((item) => (
+            isMultiPage ? (
+              <button
+                key={item.id}
+                onClick={() => { setActivePage(item.id); setMobileMenuOpen(false); }}
+                className={`block w-full text-left px-3 py-2 rounded-lg text-base font-medium ${
+                  activePage === item.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {item.name}
+              </button>
+            ) : (
+              <a
+                key={item.name}
+                href={item.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="block px-3 py-2 rounded-lg text-base font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {item.name}
+              </a>
+            )
+          ))}
+        </div>
+      )}
+    </header>
+  );
+}
+""".replace("__NAME__", b_name).replace("__MULTI_NAV__", multi_nav_json).replace("__SINGLE_NAV__", single_nav_json)
+        files.append(CodeFile(path="src/components/Navbar.jsx", content=navbar_jsx, description="React Navbar component"))
+
+        # 7. src/components/Hero.jsx
+        hero_jsx = """import React from 'react';
+import { ArrowRight, CheckCircle2, ShieldCheck, Sparkles } from 'lucide-react';
+
+export default function Hero({ onCtaClick }) {
+  return (
+    <section id="home" className="relative py-20 lg:py-32 overflow-hidden bg-gradient-to-b from-slate-50 to-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 border border-blue-200/60 text-blue-700 font-semibold text-xs tracking-wide uppercase mb-8 shadow-sm">
+          <Sparkles className="w-4 h-4 text-blue-600" />
+          <span>__INDUSTRY__ Excellence</span>
+        </div>
+
+        <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold text-slate-900 tracking-tight max-w-4xl mx-auto leading-tight">
+          __NAME__
+        </h1>
+
+        <p className="mt-6 text-xl sm:text-2xl text-slate-600 max-w-3xl mx-auto font-normal leading-relaxed">
+          __TAGLINE__
+        </p>
+
+        <p className="mt-4 text-base sm:text-lg text-slate-500 max-w-2xl mx-auto">
+          __SUMMARY__
+        </p>
+
+        <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <button
+            onClick={onCtaClick}
+            className="w-full sm:w-auto px-8 py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25 transition-all inline-flex items-center justify-center gap-2"
+          >
+            <span>Get Started</span>
+            <ArrowRight className="w-5 h-5" />
+          </button>
+          <a
+            href="#about"
+            className="w-full sm:w-auto px-8 py-4 rounded-xl font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-all text-center"
+          >
+            Learn More
+          </a>
+        </div>
+
+        <div className="mt-16 grid grid-cols-2 md:grid-cols-3 gap-6 max-w-3xl mx-auto pt-8 border-t border-slate-200/60 text-left">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            <span className="text-sm font-semibold text-slate-700">Verified Quality</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-5 h-5 text-blue-500 shrink-0" />
+            <span className="text-sm font-semibold text-slate-700">Enterprise Standards</span>
+          </div>
+          <div className="flex items-center gap-3 col-span-2 md:col-span-1">
+            <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+            <span className="text-sm font-semibold text-slate-700">100% Client Focus</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+""".replace("__NAME__", b_name).replace("__INDUSTRY__", ind).replace("__TAGLINE__", tagline).replace("__SUMMARY__", summary)
+        files.append(CodeFile(path="src/components/Hero.jsx", content=hero_jsx, description="React Hero component"))
+
+        # 8. src/components/Features.jsx
+        features_jsx = """import React from 'react';
+import { Sparkles, Zap, ShieldCheck, Star, Award, Layers } from 'lucide-react';
+
+export default function Features() {
+  const features = [
+    {
+      title: "Signature __INDUSTRY__ Solutions",
+      description: "Engineered specifically for __NAME__ clients to drive superior outcomes with modern standards.",
+      icon: Sparkles
+    },
+    {
+      title: "Rapid Execution & Precision",
+      description: "Accelerating timelines through disciplined workflows and proven methodologies.",
+      icon: Zap
+    },
+    {
+      title: "Dedicated Specialist Advisory",
+      description: "Continuous consultation and dedicated specialist oversight at every milestone.",
+      icon: ShieldCheck
+    },
+    {
+      title: "Quality Benchmarks",
+      description: "Uncompromising focus on high performance, accessibility, and modern responsive design.",
+      icon: Award
+    },
+    {
+      title: "Customized Architecture",
+      description: "Tailored to your specific organizational workflows and strategic priorities.",
+      icon: Layers
+    },
+    {
+      title: "Client-Centric Philosophy",
+      description: "Focused transparent communication and verified results at every project phase.",
+      icon: Star
+    }
+  ];
+
+  return (
+    <section id="services" className="py-24 bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+            What We Deliver
+          </span>
+          <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Comprehensive Capabilities for Every Milestone
+          </h2>
+          <p className="mt-4 text-lg text-slate-600">
+            Explore our curated suite of professional capabilities designed to elevate your standard of service.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {features.map((item, idx) => {
+            const Icon = item.icon;
+            return (
+              <div key={idx} className="p-8 bg-white rounded-2xl border border-slate-200/70 shadow-sm hover:shadow-md transition-all">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-5">
+                  <Icon className="w-6 h-6" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">{item.title}</h3>
+                <p className="text-slate-600 leading-relaxed text-sm">{item.description}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+""".replace("__NAME__", b_name).replace("__INDUSTRY__", ind)
+        files.append(CodeFile(path="src/components/Features.jsx", content=features_jsx, description="React Features and Capabilities component"))
+
+        # 9. src/components/Contact.jsx
+        contact_jsx = """import React, { useState } from 'react';
+import { Mail, Phone, MapPin, Send, CheckCircle2, AlertCircle } from 'lucide-react';
+
+export default function Contact({ projectId = '__PROJECT_ID__' }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    subject: '',
+    message: '',
+    website_hp: ''
+  });
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.name || !formData.email || !formData.message) {
+      setStatus({ type: 'error', message: 'Please complete all required fields.' });
+      return;
+    }}
+
+    setLoading(true);
+    setStatus(null);
+
+    try {
+      const res = await fetch(`/api/v1/projects/${projectId}/contact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+
+      if (res.ok) {
+        setStatus({ type: 'success', message: 'Thank you! Your message has been received successfully.' });
+        setFormData({ name: '', email: '', phone: '', subject: '', message: '', website_hp: '' });
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Submission failed' }));
+        setStatus({ type: 'error', message: err.detail || 'Failed to submit form. Please try again.' });
+      }
+    } catch (error) {
+      setStatus({ type: 'error', message: 'Network error while submitting. Please check connection.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section id="contact" className="py-24 bg-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+          <div className="lg:col-span-5 space-y-8">
+            <div>
+              <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+                Contact Us
+              </span>
+              <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                Let's Start a Conversation
+              </h2>
+              <p className="mt-4 text-slate-600 leading-relaxed">
+                Reach out to our team today to discuss your vision, request a customized proposal, or schedule a consultation.
+              </p>
+            </div>
+
+            <div className="space-y-6 pt-4">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Email Inquiries</h4>
+                  <p className="text-slate-600 text-sm mt-1">__EMAIL__</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Phone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Phone Support</h4>
+                  <p className="text-slate-600 text-sm mt-1">__PHONE__</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Headquarters</h4>
+                  <p className="text-slate-600 text-sm mt-1">Global Services Network</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-7 bg-slate-50 p-8 sm:p-10 rounded-3xl border border-slate-200/70">
+            <h3 className="text-2xl font-bold text-slate-900 mb-6">Send an Inquiry</h3>
+
+            {status && (
+              <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 border text-sm font-medium ${
+                status.type === 'success' 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                  : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}>
+                {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
+                <span>{status.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <input type="text" name="website_hp" value={formData.website_hp} onChange={handleChange} className="hidden" tabIndex={-1} autoComplete="off" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Full Name *</label>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    value={formData.name}
+                    onChange={handleChange}
+                    placeholder="Jane Doe"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Email Address *</label>
+                  <input
+                    type="email"
+                    name="email"
+                    required
+                    value={formData.email}
+                    onChange={handleChange}
+                    placeholder="jane@example.com"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Phone Number</label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    placeholder="+1 (555) 000-0000"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Subject</label>
+                  <input
+                    type="text"
+                    name="subject"
+                    value={formData.subject}
+                    onChange={handleChange}
+                    placeholder="Project Inquiry"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Message *</label>
+                <textarea
+                  name="message"
+                  required
+                  rows={4}
+                  value={formData.message}
+                  onChange={handleChange}
+                  placeholder="Tell us about your requirements..."
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm resize-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                <Send className="w-4 h-4" />
+                <span>{loading ? 'Sending Message...' : 'Submit Inquiry'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+""".replace("__PROJECT_ID__", project_id).replace("__EMAIL__", email).replace("__PHONE__", phone)
+        files.append(CodeFile(path="src/components/Contact.jsx", content=contact_jsx, description="React Contact form component"))
+
+        # 10. src/components/Footer.jsx
+        footer_jsx = """import React from 'react';
+import { Sparkles, Mail, Phone } from 'lucide-react';
+
+export default function Footer() {
+  return (
+    <footer className="bg-slate-950 text-slate-400 py-16 border-t border-slate-800">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
+          <div className="md:col-span-2 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <span className="font-extrabold text-xl text-white tracking-tight">__NAME__</span>
+            </div>
+            <p className="text-slate-400 max-w-sm text-sm leading-relaxed">
+              __TAGLINE__. Dedicated to delivering excellence, precision, and reliable service.
+            </p>
+          </div>
+
+          <div>
+            <h4 className="text-white font-bold text-sm tracking-wider uppercase mb-4">Direct Contact</h4>
+            <ul className="space-y-2.5 text-sm">
+              <li className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-blue-400" />
+                <span>__EMAIL__</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Phone className="w-4 h-4 text-blue-400" />
+                <span>__PHONE__</span>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-white font-bold text-sm tracking-wider uppercase mb-4">Platform</h4>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Powered by AI Website Builder Agent. Built with modern React and Tailwind CSS.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-12 pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row justify-between items-center text-xs text-slate-500 gap-4">
+          <p>© {new Date().getFullYear()} __NAME__. All rights reserved.</p>
+          <div className="flex gap-6">
+            <span>Privacy Policy</span>
+            <span>Terms of Service</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
+""".replace("__NAME__", b_name).replace("__TAGLINE__", tagline).replace("__EMAIL__", email).replace("__PHONE__", phone)
+        files.append(CodeFile(path="src/components/Footer.jsx", content=footer_jsx, description="React Footer component"))
+
+        # 11. Multi-page components or Single-page App.jsx
+        if is_multi:
+            # Multi-page pages
+            home_page_jsx = """import React from 'react';
+import Hero from '../components/Hero';
+import Features from '../components/Features';
+import Contact from '../components/Contact';
+
+export default function HomePage({ setActivePage }) {
+  return (
+    <main>
+      <Hero onCtaClick={() => setActivePage('services')} />
+      <Features />
+      <div className="py-16 bg-blue-600 text-white text-center">
+        <div className="max-w-4xl mx-auto px-4">
+          <h2 className="text-3xl font-extrabold mb-4">Ready to Transform Your __INDUSTRY__ Experience?</h2>
+          <p className="text-blue-100 mb-8 max-w-2xl mx-auto">Discover how __NAME__ partners with you to achieve measurable success.</p>
+          <button onClick={() => setActivePage('contact')} className="px-8 py-3.5 bg-white text-blue-600 rounded-xl font-bold hover:bg-blue-50 transition-all shadow-md">
+            Connect With Us Today
+          </button>
+        </div>
+      </div>
+      <Contact />
+    </main>
+  );
+}
+""".replace("__NAME__", b_name).replace("__INDUSTRY__", ind)
+            files.append(CodeFile(path="src/pages/Home.jsx", content=home_page_jsx, description="React Home page"))
+
+            about_page_jsx = """import React from 'react';
+import { CheckCircle2, Target, Users } from 'lucide-react';
+
+export default function AboutPage() {
+  return (
+    <main className="py-20 bg-white">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl mx-auto text-center mb-16">
+          <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+            About Our Company
+          </span>
+          <h1 className="mt-4 text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+            The Story Behind __NAME__
+          </h1>
+          <p className="mt-4 text-xl text-slate-600 leading-relaxed">
+            __SUMMARY__
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center my-16">
+          <div className="space-y-6">
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">
+              Committed to Distinction in __INDUSTRY__
+            </h2>
+            <p className="text-slate-600 leading-relaxed">
+              Founded on the pillars of integrity, technological excellence, and client empowerment, __NAME__ has consistently redefined performance benchmarks across the sector.
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                <span className="font-semibold text-slate-700">Client-First Methodology</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                <span className="font-semibold text-slate-700">Dedicated Subject Specialists</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                <span className="font-semibold text-slate-700">Transparent Accountability</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-100 p-8 rounded-3xl border border-slate-200">
+            <div className="grid grid-cols-2 gap-6 text-center">
+              <div className="p-6 bg-white rounded-2xl shadow-sm">
+                <Target className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                <div className="text-3xl font-extrabold text-slate-900">100%</div>
+                <div className="text-xs text-slate-500 font-semibold uppercase mt-1">Delivery Focus</div>
+              </div>
+              <div className="p-6 bg-white rounded-2xl shadow-sm">
+                <Users className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                <div className="text-3xl font-extrabold text-slate-900">24/7</div>
+                <div className="text-xs text-slate-500 font-semibold uppercase mt-1">Direct Advisory</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+""".replace("__NAME__", b_name).replace("__INDUSTRY__", ind).replace("__SUMMARY__", summary)
+            files.append(CodeFile(path="src/pages/About.jsx", content=about_page_jsx, description="React About page"))
+
+            services_page_jsx = """import React from 'react';
+import Features from '../components/Features';
+
+export default function ServicesPage() {
+  return (
+    <main>
+      <div className="bg-slate-900 text-white py-20 text-center">
+        <div className="max-w-4xl mx-auto px-4">
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">Our Services & Solutions</h1>
+          <p className="mt-4 text-lg text-slate-300 max-w-2xl mx-auto">
+            Comprehensive services tailored to meet the dynamic needs of __INDUSTRY__ leaders.
+          </p>
+        </div>
+      </div>
+      <Features />
+    </main>
+  );
+}
+""".replace("__INDUSTRY__", ind)
+            files.append(CodeFile(path="src/pages/Services.jsx", content=services_page_jsx, description="React Services page"))
+
+            portfolio_page_jsx = """import React from 'react';
+import { ExternalLink } from 'lucide-react';
+
+export default function PortfolioPage() {
+  const projects = [
+    { title: "Enterprise Initiative Alpha", category: "__INDUSTRY__", desc: "Comprehensive transformation delivering superior performance and measurable ROI." },
+    { title: "Digital Optimization Platform", category: "Innovation", desc: "Modernized infrastructure designed for rapid scaling and operational efficiency." },
+    { title: "Strategic Advisory Program", category: "Consulting", desc: "Long-term partnership driving strategic differentiation and stakeholder value." }
+  ];
+
+  return (
+    <main className="py-20 bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+            Case Studies
+          </span>
+          <h1 className="mt-4 text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+            Featured Projects & Milestones
+          </h1>
+          <p className="mt-4 text-slate-600">
+            A selection of benchmark work delivered by __NAME__.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {projects.map((p, i) => (
+            <div key={i} className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm hover:shadow-md transition-all">
+              <span className="text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50 px-2.5 py-1 rounded-md">{p.category}</span>
+              <h3 className="text-xl font-bold text-slate-900 mt-4 mb-2">{p.title}</h3>
+              <p className="text-slate-600 text-sm leading-relaxed mb-6">{p.desc}</p>
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-blue-600 font-semibold text-sm">
+                <span>View Details</span>
+                <ExternalLink className="w-4 h-4" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+""".replace("__NAME__", b_name).replace("__INDUSTRY__", ind)
+            files.append(CodeFile(path="src/pages/Portfolio.jsx", content=portfolio_page_jsx, description="React Portfolio page"))
+
+            contact_page_jsx = """import React from 'react';
+import Contact from '../components/Contact';
+
+export default function ContactPage() {
+  return (
+    <main>
+      <div className="bg-slate-900 text-white py-16 text-center">
+        <div className="max-w-4xl mx-auto px-4">
+          <h1 className="text-4xl font-extrabold">Connect With Our Team</h1>
+          <p className="mt-2 text-slate-300">We respond promptly to all project consultations and inquiries.</p>
+        </div>
+      </div>
+      <Contact />
+    </main>
+  );
+}
+"""
+            files.append(CodeFile(path="src/pages/Contact.jsx", content=contact_page_jsx, description="React Contact page"))
+
+            case_study_page_jsx = """import React from 'react';
+import { Target, CheckCircle2, TrendingUp, Award, ArrowRight } from 'lucide-react';
+
+export default function CaseStudyPage() {
+  const studies = [
+    {
+      title: "Enterprise Digital Acceleration",
+      client: "Global Tech Enterprises",
+      metric: "+320% Efficiency",
+      challenge: "Legacy architecture hindering real-time cross-platform synchronization and scale.",
+      solution: "Architected high-throughput cloud infrastructure and reactive micro-frontends with zero system downtime.",
+      outcome: "Exceeded SLA targets and reduced operational response latency from 1.2s to 42ms."
+    },
+    {
+      title: "High-Performance Cloud Infrastructure",
+      client: "Apex Financial Partners",
+      metric: "99.999% Uptime",
+      challenge: "Demanding strict regulatory compliance alongside sub-millisecond transaction processing.",
+      solution: "Engineered isolated deterministic data pipelines with automated failover replication.",
+      outcome: "Processed 10M+ daily transactions flawlessly with industry-benchmark security compliance."
+    },
+    {
+      title: "Next-Gen Client Experience Transformation",
+      client: "Vanguard Modern Studio",
+      metric: "4.9/5 CSAT",
+      challenge: "Fragmented customer onboarding resulting in high conversion friction.",
+      solution: "Redesigned complete interactive digital workflow with personalized automated journeys.",
+      outcome: "Achieved double-digit conversion surge within 30 days post-launch."
+    }
+  ];
+
+  return (
+    <main className="py-20 bg-slate-50 min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+            Case Studies & Proven Outcomes
+          </span>
+          <h1 className="mt-4 text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+            Measurable Results for __NAME__ Partners
+          </h1>
+          <p className="mt-4 text-slate-600 text-lg">
+            Detailed breakdowns of high-impact engineering, strategy, and execution milestones.
+          </p>
+        </div>
+
+        <div className="space-y-10 max-w-5xl mx-auto">
+          {studies.map((item, idx) => (
+            <div key={idx} className="bg-white rounded-3xl p-8 sm:p-10 border border-slate-200 shadow-sm hover:shadow-md transition-all">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
+                <div>
+                  <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">{item.client}</span>
+                  <h3 className="text-2xl font-bold text-slate-900 mt-1">{item.title}</h3>
+                </div>
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm border border-emerald-200/60 self-start sm:self-auto">
+                  <TrendingUp className="w-4 h-4" />
+                  <span>{item.metric}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Challenge</h4>
+                  <p className="text-slate-600 text-sm leading-relaxed">{item.challenge}</p>
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Solution</h4>
+                  <p className="text-slate-600 text-sm leading-relaxed">{item.solution}</p>
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Outcome</h4>
+                  <p className="text-slate-600 text-sm leading-relaxed">{item.outcome}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+""".replace("__NAME__", b_name)
+            files.append(CodeFile(path="src/pages/CaseStudy.jsx", content=case_study_page_jsx, description="React Case Studies page"))
+
+            custom_page_jsx = """import React from 'react';
+import { Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
+
+export default function CustomPage({ title = "Details", setActivePage }) {
+  return (
+    <main className="py-20 bg-white min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+            __NAME__ · Overview
+          </span>
+          <h1 className="mt-4 text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+            {title}
+          </h1>
+          <p className="mt-4 text-lg text-slate-600">
+            Dedicated information and premium resources from __NAME__.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 my-12">
+          <div className="bg-slate-50 p-8 rounded-2xl border border-slate-200">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center mb-4">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-slate-900 text-lg mb-2">Strategic Focus</h3>
+            <p className="text-slate-600 text-sm leading-relaxed">
+              Every detail is calibrated to deliver premier value and clear business outcomes.
+            </p>
+          </div>
+          <div className="bg-slate-50 p-8 rounded-2xl border border-slate-200">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center mb-4">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-slate-900 text-lg mb-2">Verified Excellence</h3>
+            <p className="text-slate-600 text-sm leading-relaxed">
+              Adhering to high industry standards and rigorous quality assurance.
+            </p>
+          </div>
+          <div className="bg-slate-50 p-8 rounded-2xl border border-slate-200">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center mb-4">
+              <ArrowRight className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-slate-900 text-lg mb-2">Continuous Support</h3>
+            <p className="text-slate-600 text-sm leading-relaxed">
+              Direct access to our specialized team whenever you need advisory.
+            </p>
+          </div>
+        </div>
+
+        <div className="text-center pt-8">
+          <button
+            onClick={() => setActivePage && setActivePage('contact')}
+            className="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/25 transition-all inline-flex items-center gap-2"
+          >
+            <span>Connect With Our Team</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
+""".replace("__NAME__", b_name)
+            files.append(CodeFile(path="src/pages/CustomPage.jsx", content=custom_page_jsx, description="React Generic Custom Page component"))
+
+            # Multi-page App.jsx
+            app_jsx = """import React, { useState } from 'react';
+import Navbar from './components/Navbar';
+import Footer from './components/Footer';
+import HomePage from './pages/Home';
+import AboutPage from './pages/About';
+import ServicesPage from './pages/Services';
+import PortfolioPage from './pages/Portfolio';
+import CaseStudyPage from './pages/CaseStudy';
+import ContactPage from './pages/Contact';
+import CustomPage from './pages/CustomPage';
+
+export default function App() {
+  const [activePage, setActivePage] = useState('home');
+
+  const renderPage = () => {
+    switch (activePage) {
+      case 'about':
+      case 'about-us':
+        return <AboutPage />;
+      case 'services':
+        return <ServicesPage />;
+      case 'portfolio':
+      case 'projects':
+        return <PortfolioPage />;
+      case 'case-study':
+      case 'case-studies':
+        return <CaseStudyPage />;
+      case 'contact':
+      case 'contact-us':
+        return <ContactPage />;
+      case 'home':
+        return <HomePage setActivePage={setActivePage} />;
+      default:
+        return <CustomPage title={activePage.replace('-', ' ').toUpperCase()} setActivePage={setActivePage} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 antialiased selection:bg-blue-500 selection:text-white">
+      <Navbar activePage={activePage} setActivePage={setActivePage} isMultiPage={true} />
+      <div className="flex-1">
+        {renderPage()}
+      </div>
+      <Footer />
+    </div>
+  );
+}
+"""
+            files.append(CodeFile(path="src/App.jsx", content=app_jsx, description="Multi-page React App router component"))
+
+        else:
+            # Single-page App.jsx
+            app_jsx = """import React from 'react';
+import Navbar from './components/Navbar';
+import Hero from './components/Hero';
+import Features from './components/Features';
+import Contact from './components/Contact';
+import Footer from './components/Footer';
+
+export default function App() {
+  const scrollToContact = () => {
+    const el = document.getElementById('contact');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 antialiased selection:bg-blue-500 selection:text-white">
+      <Navbar activePage="home" isMultiPage={false} />
+      <main className="flex-1">
+        <Hero onCtaClick={scrollToContact} />
+        <section id="about" className="py-20 bg-slate-50 border-t border-b border-slate-100">
+          <div className="max-w-4xl mx-auto px-4 text-center">
+            <span className="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200/60">
+              Our Vision
+            </span>
+            <h2 className="mt-4 text-3xl font-extrabold text-slate-900">Built to Accelerate Your Success</h2>
+            <p className="mt-4 text-lg text-slate-600 leading-relaxed">
+              __SUMMARY__
+            </p>
+          </div>
+        </section>
+        <Features />
+        <Contact />
+      </main>
+      <Footer />
+    </div>
+  );
+}
+""".replace("__SUMMARY__", summary)
+            files.append(CodeFile(path="src/App.jsx", content=app_jsx, description="Single-page React App component"))
+
+        return files
+
 design_agent = DesignAgent()
+

@@ -121,8 +121,8 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
           💡 <strong>Live Functional Website:</strong> Links, mobile navigation, and contact forms submit to the backend database in real time.
         </span>
         {project.active_checkpoint_hash && (
-          <span className="font-mono text-[10px] text-blue-600">
-            Git HEAD: {project.active_checkpoint_hash.substring(0, 8)}
+          <span className="text-[10px] font-semibold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-md" title={`Version checkpoint: ${project.active_checkpoint_hash.substring(0, 8)}`}>
+            Version: Saved & In Sync
           </span>
         )}
       </div>

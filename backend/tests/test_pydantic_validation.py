@@ -25,40 +25,37 @@ def get_base_project_data():
 
 
 # ===========================================================================
-# 1. Tech Stack Validation & Consistent Default (react-php)
+# 1. Tech Stack Validation & Consistent Default (react)
 # ===========================================================================
 
 def test_tech_stack_default_and_supported():
-    """Default must be 'react-php', and only explicitly supported stacks allowed."""
+    """Default must be 'react', and only explicitly supported stacks allowed."""
     data = get_base_project_data()
     project = ProjectCreate(**data)
-    assert project.tech_stack == "react-php"
-
-    # Supported alternative
-    project_alt = ProjectCreate(**data, tech_stack="html-tailwind-php")
-    assert project_alt.tech_stack == "html-tailwind-php"
+    assert project.tech_stack == "react"
 
 
 def test_tech_stack_rejects_unsupported_values():
     """Unsupported tech stacks must raise a clear ValidationError and not be silently coerced."""
     data = get_base_project_data()
-    invalid_stacks = ["vue", "django", "pure-react", "react", "nextjs", "angular", "flask"]
+    invalid_stacks = ["vue", "django", "pure-react", "react-php", "html-tailwind-php", "nextjs", "angular", "flask"]
     for stack in invalid_stacks:
         with pytest.raises(ValidationError) as exc_info:
             ProjectCreate(**data, tech_stack=stack)
         err_msg = str(exc_info.value)
         assert "Unsupported tech_stack" in err_msg or "supported" in err_msg.lower()
-        assert "react-php" in err_msg
+        assert "react" in err_msg
 
 
 def test_tech_stack_in_project_update():
     """ProjectUpdate validates tech_stack when provided."""
-    update_valid = ProjectUpdate(tech_stack="react-php")
-    assert update_valid.tech_stack == "react-php"
+    update_valid = ProjectUpdate(tech_stack="react")
+    assert update_valid.tech_stack == "react"
 
     with pytest.raises(ValidationError) as exc_info:
         ProjectUpdate(tech_stack="invalid-stack")
     assert "Unsupported tech_stack" in str(exc_info.value)
+
 
 
 # ===========================================================================
@@ -104,17 +101,20 @@ def test_selected_pages_slug_normalization():
     assert p.selected_pages == ["home", "about", "contact", "portfolio"]
 
 
-def test_selected_pages_rejects_unsupported_slugs():
-    """Unsupported or malformed slugs must raise a ValidationError."""
+def test_selected_pages_rejects_reserved_and_invalid_slugs():
+    """Reserved routes and malformed slugs must raise a ValidationError."""
     data = get_base_project_data()
+
+    # Reserved platform route
     with pytest.raises(ValidationError) as exc_info:
         ProjectCreate(
             **data,
             website_type="multi-page",
-            selected_pages=["home", "unsupported-cryptocurrency-exchange"]
+            selected_pages=["home", "admin"]
         )
-    assert "Unsupported page slug" in str(exc_info.value)
+    assert "reserved platform route" in str(exc_info.value)
 
+    # Invalid characters / format
     with pytest.raises(ValidationError) as exc_info:
         ProjectCreate(
             **data,
@@ -122,6 +122,60 @@ def test_selected_pages_rejects_unsupported_slugs():
             selected_pages=["home", "invalid page with symbols!@#"]
         )
     assert "Invalid page slug format" in str(exc_info.value)
+
+    # Empty slug entry
+    with pytest.raises(ValidationError) as exc_info:
+        ProjectCreate(
+            **data,
+            website_type="multi-page",
+            selected_pages=["home", "   "]
+        )
+    assert "cannot be empty" in str(exc_info.value)
+
+
+def test_selected_pages_supports_valid_custom_slugs_and_decomposition():
+    """Custom valid slugs (case-study, our-team) and compound action entries must be cleanly supported."""
+    data = get_base_project_data()
+
+    # Custom slugs: case-study, our-team
+    p1 = ProjectCreate(
+        **data,
+        website_type="multi-page",
+        selected_pages=["home", "case-study", "our-team"]
+    )
+    assert p1.selected_pages == ["home", "case-study", "our-team"]
+
+    # Exact failing input regression: ['Home', 'Add Portfolio About', 'Case Study']
+    p2 = ProjectCreate(
+        **data,
+        website_type="multi-page",
+        selected_pages=["Home", "Add Portfolio About", "Case Study"]
+    )
+    assert p2.selected_pages == ["home", "portfolio", "about", "case-study"]
+
+    # Regression: Prompt-polluted slugs like 'use-selected-pages:-home' must be cleanly stripped and normalized
+    p3 = ProjectCreate(
+        **data,
+        website_type="multi-page",
+        selected_pages=["home", "use-selected-pages:-home", "pricing", "contact"]
+    )
+    assert p3.selected_pages == ["home", "pricing", "contact"]
+
+    # Regression: Prompt sentences like 'Use selected pages: Home, Pricing, Contact'
+    p4 = ProjectCreate(
+        **data,
+        website_type="multi-page",
+        selected_pages=["home", "Use selected pages: Home, Pricing, Contact"]
+    )
+    assert p4.selected_pages == ["home", "pricing", "contact"]
+
+    # Regression: Instruction noise string like 'use-selected-pages' alongside legitimate pages
+    p5 = ProjectCreate(
+        **data,
+        website_type="multi-page",
+        selected_pages=["home", "use-selected-pages", "pricing", "contact"]
+    )
+    assert p5.selected_pages == ["home", "pricing", "contact"]
 
 
 def test_single_page_consistency():
@@ -343,9 +397,9 @@ def test_requirements_review_validation():
         target_audience="Homeowners and developers",
         website_type="multi-page",
         selected_pages=["home", "about", "services", "portfolio", "contact"],
-        tech_stack="react-php"
+        tech_stack="react"
     )
-    assert rr.tech_stack == "react-php"
+    assert rr.tech_stack == "react"
     assert rr.website_type == "multi-page"
     assert "home" in rr.selected_pages
 
@@ -358,9 +412,10 @@ def test_requirements_review_validation():
             target_audience="Homeowners",
             website_type="single-page",
             selected_pages=["home", "about", "services"],
-            tech_stack="react-php"
+            tech_stack="react"
         )
     assert "must only contain ['home']" in str(exc_info.value)
+
 
 
 # ===========================================================================

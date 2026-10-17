@@ -11,7 +11,7 @@ export interface Project {
   logo_url?: string;
   website_type: 'single-page' | 'multi-page';
   selected_pages?: string[];
-  tech_stack: string;
+  tech_stack: 'react';
   subdomain?: string;
   custom_domain?: string;
   status: 'draft' | 'planning' | 'generating_assets' | 'generating_design' | 'generating_backend' | 'validating' | 'ready' | 'failed';

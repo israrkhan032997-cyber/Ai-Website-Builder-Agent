@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -54,20 +55,36 @@ class AIProviderService:
         if not resolved_key:
             return False, "Gemini API key is not configured. Provide an API key in Settings.", None
 
-        try:
-            client = genai.Client(api_key=resolved_key)
-            model_name = settings.GEMINI_MODEL or "gemini-2.5-flash"
-            response = client.models.generate_content(
-                model=model_name,
-                contents="Respond with only the word: OK",
-            )
-            if response and response.text:
-                return True, "Successfully connected to Google Gemini API.", model_name
-            return False, "Empty response from Gemini provider.", model_name
-        except Exception as e:
-            err_msg = str(e)
-            logger.error(f"Gemini test connection failed: {err_msg}")
-            return False, f"Gemini connection failed: {err_msg}", None
+        models_to_test = [settings.GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+        models_to_try = [m for i, m in enumerate(models_to_test) if m and m not in models_to_test[:i]]
+
+        import time
+        start_time = time.time()
+        last_err = ""
+        client = genai.Client(api_key=resolved_key)
+
+        for model_name in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents="Respond with only the word: OK",
+                )
+                latency = round((time.time() - start_time) * 1000, 2)
+                if response and response.text:
+                    logger.info(f"Gemini connection verified via {model_name} in {latency}ms")
+                    return True, f"Successfully connected to Google Gemini API ({model_name}, {latency}ms).", model_name
+            except Exception as e:
+                err_str = str(e)
+                last_err = err_str
+                # Don't log secrets
+                if "API_KEY_INVALID" in err_str or "400" in err_str and "key" in err_str.lower():
+                    return False, "Invalid Gemini API key. Please check your credentials.", None
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    return False, "Gemini quota exceeded or rate limit reached (429).", None
+                logger.warning(f"Connection test with {model_name} failed: {err_str[:120]}")
+                continue
+
+        return False, f"Gemini connection could not reach models. Error: {last_err[:120]}", None
 
     def _extract_json(self, raw_text: str) -> Dict[str, Any]:
         """Extracts JSON object from text, stripping markdown fences if present."""
@@ -109,29 +126,34 @@ class AIProviderService:
         full_prompt = f"{prompt}\n\nStrict requirement: Output only valid JSON matching this schema: {schema_class.model_json_schema()}"
 
         last_err = ""
-        for model in models_to_try:
-            try:
-                config = types.GenerateContentConfig(
-                    system_instruction=sys_prompt,
-                    response_mime_type="application/json",
-                    temperature=0.3
-                )
-                response = client.models.generate_content(
-                    model=model,
-                    contents=full_prompt,
-                    config=config
-                )
+        for attempt in range(2):
+            for model in models_to_try:
+                try:
+                    config = types.GenerateContentConfig(
+                        system_instruction=sys_prompt,
+                        response_mime_type="application/json",
+                        temperature=0.3
+                    )
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=full_prompt,
+                        config=config
+                    )
 
-                if not response or not response.text:
+                    if not response or not response.text:
+                        continue
+
+                    data = self._extract_json(response.text)
+                    instance = schema_class.model_validate(data)
+                    return instance, f"Successfully generated via {model}."
+                except Exception as e:
+                    last_err = str(e)
+                    logger.warning(f"Structured generation with model {model} (attempt {attempt + 1}) failed: {e}")
+                    if "503" in str(e) or "429" in str(e):
+                        await asyncio.sleep(1.0)
                     continue
-
-                data = self._extract_json(response.text)
-                instance = schema_class.model_validate(data)
-                return instance, f"Successfully generated via {model}."
-            except Exception as e:
-                last_err = str(e)
-                logger.warning(f"Structured generation with model {model} failed: {e}")
-                continue
+            if attempt == 0 and ("503" in last_err or "429" in last_err):
+                await asyncio.sleep(2.0)
 
         return None, f"Gemini generation error across models: {last_err}"
 
@@ -141,37 +163,45 @@ class AIProviderService:
         system_instruction: Optional[str] = None,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None
-    ) -> Optional[str]:
+    ) -> Tuple[Optional[str], str]:
         """
         Generates freeform text using Gemini with resilient model fallback.
+        Returns: (generated_text, log_message)
         """
         client = self.get_client(api_key)
         if not client:
-            return None
+            return None, "No active Gemini API key configured."
 
         candidate_models = [model_name] if model_name else [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash"]
         models_to_try = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
 
         sys_prompt = system_instruction or "You are a professional, helpful conversational AI assistant."
 
-        for model in models_to_try:
-            try:
-                config = types.GenerateContentConfig(
-                    system_instruction=sys_prompt,
-                    temperature=0.7
-                )
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=config
-                )
-                if response and response.text:
-                    return response.text.strip()
-            except Exception as e:
-                logger.warning(f"Text generation with model {model} failed: {e}")
-                continue
+        last_err = ""
+        for attempt in range(2):
+            for model in models_to_try:
+                try:
+                    config = types.GenerateContentConfig(
+                        system_instruction=sys_prompt,
+                        temperature=0.7
+                    )
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=config
+                    )
+                    if response and response.text:
+                        return response.text.strip(), f"Successfully generated via {model}."
+                except Exception as e:
+                    last_err = str(e)
+                    logger.warning(f"Text generation with model {model} (attempt {attempt + 1}) failed: {e}")
+                    if "503" in str(e) or "429" in str(e):
+                        await asyncio.sleep(1.0)
+                    continue
+            if attempt == 0 and ("503" in last_err or "429" in last_err):
+                await asyncio.sleep(2.0)
 
-        return None
+        return None, f"Gemini generation error across models: {last_err}"
 
 ai_provider = AIProviderService()
 

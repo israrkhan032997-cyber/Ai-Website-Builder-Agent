@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,6 +15,8 @@ from backend.app.schemas.project import NaturalLanguageEditRequest
 from backend.app.schemas.agent import WebsitePlan, AssetManifest, ValidationResult
 from backend.app.services.workspace_manager import workspace_manager
 from backend.app.services.git_service import git_service
+from backend.app.services.ai_provider import ai_provider
+from backend.app.services.editing_service import editing_service
 from backend.app.agents.orchestrator import orchestrator_agent
 from backend.app.agents.asset_agent import asset_agent
 from backend.app.agents.design_agent import design_agent
@@ -188,22 +191,22 @@ async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(ge
         )
 
         # -------------------------------------------------------------
-        # STAGE 4: Backend Agent (Contact Form, PHP Backend & Serverless)
+        # STAGE 4: Backend Agent (Contact Form, React REST API & Serverless)
         # -------------------------------------------------------------
         project.status = "generating_backend"
         project.current_agent = backend_agent.AGENT_NAME
-        project.current_step = "Configuring PHP backend bundle and serverless submission handlers"
+        project.current_step = "Configuring React REST API endpoints and serverless submission handlers"
         project.progress_percentage = "80%"
         await db.commit()
 
-        # 1. Full Production PHP Backend Bundle (api/config.php, api/contact.php, api/database.sql, api/subscribe.php)
-        php_files = backend_agent.generate_php_backend_bundle(
+        # 1. Production React REST and Serverless Bundle (api/contact.js, api/README.md)
+        api_files = backend_agent.generate_api_bundle(
             project_id=project_id,
             business_name=project.name,
             admin_email=plan.contact_email
         )
-        for php_file in php_files:
-            workspace_manager.write_file(project_id, php_file.path, php_file.content)
+        for f in api_files:
+            workspace_manager.write_file(project_id, f.path, f.content)
 
         # 2. Serverless route handler (Netlify / Node)
         serverless_file = backend_agent.generate_serverless_handler(project_id)
@@ -211,8 +214,8 @@ async def run_generation_pipeline(project_id: str, db: AsyncSession = Depends(ge
 
         await _add_log(
             db, project_id, backend_agent.AGENT_NAME, "Backend Integration",
-            "success", f"Generated complete PHP backend bundle ({len(php_files)} files: api/config.php, api/contact.php, api/database.sql, api/subscribe.php) and serverless route.",
-            output_payload={"php_files": [f.path for f in php_files], "serverless_path": serverless_file.path}
+            "success", f"Generated React REST API and serverless handlers ({len(api_files)} files: api/contact.js, api/README.md) and serverless route.",
+            output_payload={"api_files": [f.path for f in api_files], "serverless_path": serverless_file.path}
         )
 
         # -------------------------------------------------------------
@@ -313,99 +316,31 @@ async def natural_language_edit(
         raise HTTPException(status_code=400, detail="Cannot edit a project before initial generation.")
 
     instruction = data.instruction.strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="Edit instruction cannot be empty.")
+
     await _add_log(
         db, project_id, orchestrator_agent.AGENT_NAME, "Natural Language Refinement",
         "in_progress", f"Processing user request: '{instruction}'"
     )
 
-    # Determine target page file
-    target_page = "index.html"
-    inst_lower = instruction.lower()
-    for potential_page in ["about", "services", "portfolio", "contact"]:
-        if potential_page in inst_lower:
-            if workspace_manager.file_exists(project_id, f"{potential_page}.html"):
-                target_page = f"{potential_page}.html"
-                break
+    result = await editing_service.apply_edit(db, project, data)
 
-    current_html = workspace_manager.read_file(project_id, target_page)
-    updated_html = current_html
-
-    # Handle color/theme updates across all files
-    if "color" in inst_lower or "theme" in inst_lower:
-        import re
-        new_color = None
-        if "emerald" in inst_lower or "green" in inst_lower:
-            new_color = "#059669"
-        elif "purple" in inst_lower or "indigo" in inst_lower:
-            new_color = "#6366f1"
-        elif "rose" in inst_lower or "red" in inst_lower:
-            new_color = "#e11d48"
-        elif "amber" in inst_lower or "orange" in inst_lower:
-            new_color = "#d97706"
-        elif "blue" in inst_lower or "sky" in inst_lower:
-            new_color = "#2563eb"
-        elif "teal" in inst_lower or "cyan" in inst_lower:
-            new_color = "#0d9488"
-        
-        hex_match = re.search(r'#(?:[0-9a-fA-F]{3}){1,2}\b', instruction)
-        if hex_match:
-            new_color = hex_match.group(0)
-
-        if new_color:
-            old_color = project.primary_color or "#2563eb"
-            project.primary_color = new_color
-            # Replace across all web files
-            all_files = workspace_manager.list_files(project_id)
-            for f_item in all_files:
-                fpath = f_item["path"] if isinstance(f_item, dict) else str(f_item)
-                if fpath.endswith((".html", ".css", ".js")):
-                    fcontent = workspace_manager.read_file(project_id, fpath)
-                    fcontent = fcontent.replace(old_color, new_color)
-                    workspace_manager.write_file(project_id, fpath, fcontent)
-            # Re-read target page content after color replacement
-            updated_html = workspace_manager.read_file(project_id, target_page)
-
-    if "headline" in inst_lower or "title" in inst_lower or "hero" in inst_lower:
-        import re
-        quotes = re.findall(r'["\'](.*?)["\']', instruction)
-        if quotes:
-            new_title = quotes[0]
-            updated_html = re.sub(
-                r'(<h1[^>]*>)(.*?)(</h1>)',
-                rf'\g<1>{new_title}\g<3>',
-                updated_html,
-                count=1,
-                flags=re.DOTALL
-            )
-
-    # Save target file
-    workspace_manager.write_file(project_id, target_page, updated_html)
-
-    # Save Git checkpoint for user iteration
-    checkpoint_msg = f"refactor: {instruction[:50]}"
-    git_ok, commit_hash, changed_files = git_service.create_checkpoint(project_id, checkpoint_msg)
-    if git_ok and commit_hash:
-        chk = Checkpoint(
-            project_id=project_id,
-            commit_hash=commit_hash,
-            message=checkpoint_msg,
-            changed_files=changed_files
-        )
-        db.add(chk)
-        project.active_checkpoint_hash = commit_hash
-
-    await db.commit()
+    commit_hash = result.get("commit_hash")
+    target_page = result.get("target_page", "index.html")
+    message = result.get("message", f"Applied edit: {instruction}")
 
     await _add_log(
         db, project_id, execution_agent.AGENT_NAME, "Refinement Applied",
-        "success", f"Applied modification and recorded Git checkpoint {commit_hash[:8] if commit_hash else 'HEAD'}.",
-        output_payload={"instruction": instruction, "commit_hash": commit_hash}
+        "success", message,
+        output_payload={"instruction": instruction, "commit_hash": commit_hash, "target_page": target_page, "modified_files": result.get("modified_files", [])}
     )
 
     return {
-        "status": "success",
-        "message": "Changes successfully applied to project workspace.",
-        "commit_hash": commit_hash
+        "status": result.get("status", "success"),
+        "message": message,
+        "commit_hash": commit_hash,
+        "target_page": target_page
     }
 
 @router.get("/logs")

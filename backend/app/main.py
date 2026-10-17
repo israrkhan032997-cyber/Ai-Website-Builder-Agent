@@ -73,13 +73,38 @@ app.include_router(subdomains_router)
 @app.get("/api/v1/health", tags=["Health"])
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Health check endpoint returning system status."""
+    """Lightweight health check endpoint returning system status without incurring AI API calls."""
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,
         "environment": settings.APP_ENV,
-        "storage_ready": True
+        "storage_ready": True,
+        "gemini_configured": bool(settings.GEMINI_API_KEY)
     }
+
+@app.get("/api/v1/health/diagnostics", tags=["Health"])
+async def health_diagnostics(check_provider: bool = False):
+    """
+    Safe diagnostic endpoint reporting configuration presence and provider reachability.
+    Only tests Gemini connection when explicitly requested via check_provider=true.
+    Never exposes secrets or API keys.
+    """
+    from backend.app.services.ai_provider import ai_provider
+    has_key = bool(settings.GEMINI_API_KEY)
+    diag = {
+        "status": "healthy",
+        "app_name": settings.APP_NAME,
+        "environment": settings.APP_ENV,
+        "storage_ready": True,
+        "gemini_configured": has_key,
+        "gemini_model_configured": settings.GEMINI_MODEL
+    }
+    if check_provider and has_key:
+        ok, msg, model = await ai_provider.test_connection()
+        diag["gemini_reachable"] = ok
+        diag["gemini_diagnostics"] = msg
+        diag["gemini_active_model"] = model
+    return diag
 
 @app.get("/", tags=["Root"])
 async def root():

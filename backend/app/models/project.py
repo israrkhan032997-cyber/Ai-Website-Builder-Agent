@@ -19,7 +19,7 @@ class Project(Base):
     # Website Architecture: single-page or multi-page
     website_type = Column(String(30), nullable=False, default="single-page") # "single-page" | "multi-page"
     selected_pages = Column(JSON, nullable=True) # list of page slugs e.g. ["home", "about", "services", "contact"]
-    tech_stack = Column(String(50), nullable=False, default="react-php") # "react-php" | "html-tailwind-php"
+    tech_stack = Column(String(50), nullable=False, default="react") # Pure React SPA
 
     # Multi-tenant Subdomain Routing
     subdomain = Column(String(100), unique=True, index=True, nullable=True) # e.g. "pepsi", "arcline"

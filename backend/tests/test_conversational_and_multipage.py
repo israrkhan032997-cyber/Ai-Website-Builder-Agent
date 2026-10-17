@@ -52,26 +52,20 @@ async def test_conversational_assistant_progression():
     assert "Home" in res4.updated_data["selected_pages"]
 
 @pytest.mark.asyncio
-async def test_php_backend_bundle_generation():
-    """Tests that BackendAgent produces full PHP backend files."""
-    files = backend_agent.generate_php_backend_bundle(
+async def test_react_api_bundle_generation():
+    """Tests that BackendAgent produces clean React API and serverless handlers."""
+    files = backend_agent.generate_api_bundle(
         project_id="test_proj_12345",
         business_name="Acme Corp",
         admin_email="admin@acme.com"
     )
     paths = [f.path for f in files]
-    assert "api/config.php" in paths
-    assert "api/database.sql" in paths
-    assert "api/contact.php" in paths
-    assert "api/subscribe.php" in paths
-    assert "README_PHP.md" in paths
+    assert "api/contact.js" in paths
+    assert "api/README.md" in paths
 
-    contact_php = next(f for f in files if f.path == "api/contact.php")
-    assert "mail(" in contact_php.content
-
-    sql_file = next(f for f in files if f.path == "api/database.sql")
-    assert "CREATE TABLE IF NOT EXISTS `contacts`" in sql_file.content
-    assert "CREATE TABLE IF NOT EXISTS `newsletter_subscribers`" in sql_file.content
+    contact_js = next(f for f in files if f.path == "api/contact.js")
+    assert "handler(request, response)" in contact_js.content
+    assert "status: 'success'" in contact_js.content
 
 @pytest.mark.asyncio
 async def test_multipage_design_bundle_generation():

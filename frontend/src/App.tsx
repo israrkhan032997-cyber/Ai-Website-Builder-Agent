@@ -133,7 +133,9 @@ export const App: React.FC = () => {
 
   const handleEditProject = async (instruction: string) => {
     if (!selectedProject) return;
-    await api.editWebsite(selectedProject.id, instruction);
+    const urlMatch = instruction.match(/https?:\/\/[^\s<>"')\]}]+/);
+    const extractedUrl = urlMatch ? urlMatch[0].replace(/[,.'")\]}]+$/, '') : undefined;
+    await api.editWebsite(selectedProject.id, instruction, undefined, extractedUrl);
     const updated = await api.getProject(selectedProject.id);
     setSelectedProject(updated);
     await loadProjectData(selectedProject.id);
