@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Send, Bot, User, ArrowRight, CheckCircle2,
-  RefreshCw, X, ArrowLeft
+  RefreshCw, X, ArrowLeft, AlertCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Project } from '../types';
@@ -425,9 +425,12 @@ export const ConversationalWizard: React.FC<ConversationalWizardProps> = ({
             )}
 
             {error && (
-              <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs flex items-center justify-between">
-                <span>{error}</span>
-                <button onClick={() => setError(null)} className="text-rose-400 hover:text-white">
+              <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 text-xs flex items-start justify-between gap-3 shadow-lg">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{error}</span>
+                </div>
+                <button onClick={() => setError(null)} className="text-rose-400 hover:text-white shrink-0 p-1">
                   <X className="w-4 h-4" />
                 </button>
               </div>

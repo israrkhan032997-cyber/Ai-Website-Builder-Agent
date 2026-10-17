@@ -19,7 +19,16 @@ async function handleResponse<T>(res: Response): Promise<T> {
         errorMessage = typeof errorData.detail === 'object' ? JSON.stringify(errorData.detail) : String(errorData.detail);
       }
     } catch {
-      errorMessage = res.statusText || errorMessage;
+      if (res.status === 404) {
+        const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+        if (!baseUrl) {
+          errorMessage = 'Backend API is not connected (404). Netlify only hosts the frontend static files; the Python FastAPI backend must be deployed separately and configured via the VITE_API_BASE_URL environment variable in Netlify.';
+        } else {
+          errorMessage = `API endpoint not found (404) at ${baseUrl}. Please ensure the backend is running and properly routed.`;
+        }
+      } else {
+        errorMessage = res.statusText || errorMessage;
+      }
     }
     throw new Error(errorMessage);
   }

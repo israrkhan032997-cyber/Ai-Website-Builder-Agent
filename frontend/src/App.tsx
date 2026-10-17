@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { Project, AgentLog, Checkpoint, ContactSubmission, CommandApproval } from './types';
 import { api } from './services/api';
 import { Navbar } from './components/Navbar';
@@ -27,6 +28,7 @@ export const App: React.FC = () => {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
 
   // Modern Lovable Workspace and Conversational Wizard modes
   const [isConversationalWizardOpen, setIsConversationalWizardOpen] = useState(false);
@@ -77,11 +79,13 @@ export const App: React.FC = () => {
       setIsLoading(true);
       const res = await api.getProjects();
       setProjects(res);
+      setBackendConnected(true);
       if (res.length > 0 && !selectedProject) {
         setSelectedProject(res[0]);
       }
     } catch (e) {
       console.error('Failed to load projects:', e);
+      setBackendConnected(false);
     } finally {
       setIsLoading(false);
     }
@@ -233,6 +237,17 @@ export const App: React.FC = () => {
         selectedProjectName={selectedProject?.name}
         hasPendingApprovals={hasPendingApprovals}
       />
+
+      {backendConnected === false && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-xs text-amber-900">
+          <div className="max-w-7xl mx-auto flex items-start sm:items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            <div className="flex-1 leading-relaxed">
+              <span className="font-bold">Backend API Not Connected:</span> Netlify is hosting the React frontend. AI generation, chat, and project persistence require the Python FastAPI backend to be hosted (e.g., Render, Railway) and connected via the <code className="bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold">VITE_API_BASE_URL</code> environment variable in your Netlify site settings.
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {activeTab === 'dashboard' && (
